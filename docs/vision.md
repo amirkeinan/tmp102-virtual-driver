@@ -1,0 +1,4 @@
+Project Goal: The goal of this project is to give me the tools to know and understand how to program in real-time embedding, and to add a project to my GitHub so that I have something to show.
+A little about me, I am a computer science student, and my desire is to find a job in the field of real-time embedding and program in CPP/C.
+Therefore, the project should be at my level, so that I understand what is happening there, and on the other hand be at a good and high professional level.
+I want the project to give me tools for low-level programming, and especially to engineer software and code correctly and well.
