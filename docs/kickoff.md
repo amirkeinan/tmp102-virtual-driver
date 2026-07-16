@@ -8,6 +8,12 @@
 
 ## 1. Project Overview
 A lightweight, portable, and dependency-free C driver for the TMP102 temperature sensor. The project includes a software-based hardware emulator (Mock) for comprehensive testing and validation over a virtual I2C bus without requiring physical hardware.
+### 1.1 Design Principles
+* **Security:** The driver should be designed to be secure against unexpected inputs and outputs.
+* **Portability:** The driver should be designed to be portable across different platforms.
+* **Testability:** The driver should be designed to be testable.
+* **Documentation:** The driver should be well-documented.
+* **Performance:** The driver should be designed to be efficient and well-optimized.
 
 ## 2. System Architecture (The 4 Layers)
 The project is strictly divided into four layers to ensure modularity, portability, and separation of concerns.
@@ -20,7 +26,7 @@ The project is strictly divided into four layers to ensure modularity, portabili
   * Asserts that the Driver returns the expected values.
   * Creates a scenario for each use case of the sensor, and edge cases of the sensor.
   * The test code should be well-documented and easy to understand. 
-  
+  * the tests should make sure that the driver implements all the features of the TMP102 sensor as they described in TMP102 datasheet.
 
 ### Layer 2: The TMP102 Driver (`src/tmp102_driver.c` | `include/tmp102_driver.h`)
 * **Role:** The core logic.
@@ -43,6 +49,7 @@ The project is strictly divided into four layers to ensure modularity, portabili
   * Maintains an internal state representing the sensor's memory array.
   * Implements the receiving end of the I2C protocol.
   * Exposes "Backdoor" functions for the Test Harness to manipulate physical conditions (`sim_set_ambient_temperature(float temp)`).
+  
 
 ---
 
