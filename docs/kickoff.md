@@ -19,8 +19,7 @@ The project is strictly divided into four layers to ensure modularity, portabili
   * Injects simulated environmental data (e.g., ambient temperature) into the Emulator.
   * Asserts that the Driver returns the expected values.
   * Creates a scenario for each use case of the sensor, and edge cases of the sensor.
-  * Each use case will be tested separately.
-  * The test code should be well-documented and easy to understand.
+  * The test code should be well-documented and easy to understand. 
   
 
 ### Layer 2: The TMP102 Driver (`src/tmp102_driver.c` | `include/tmp102_driver.h`)
@@ -30,6 +29,7 @@ The project is strictly divided into four layers to ensure modularity, portabili
   * Manages the specific TMP102 Register Map.
   * Performs bitwise operations (parsing 12-bit/13-bit temperatures, handling two's complement).
   * **Design Rule:** Zero global variables. Operates exclusively via context structs and injected HAL function pointers.
+  * **Documentation:** Ensure all API functions, structs, and the core driver logic are comprehensively documented.
 
 ### Layer 3: Hardware Abstraction Layer (HAL)
 * **Role:** The communication bridge.
@@ -103,12 +103,14 @@ typedef struct {
 * Support 12-bit Normal Mode temperature reading.
 * Implement error handling (`tmp102_status_t`).
 * Write unit tests for positive, negative, and fractional temperature values.
+* Setup a CI/CD pipeline (e.g., GitHub Actions) to automate testing and build processes.
 
 ### Phase 2: Advanced Features
 * Configuration Register (0x01) read/write operations.
 * Support for Extended Mode (13-bit) for temperatures > 128°C.
 * Conversion Rate (CR0, CR1) and Shutdown Mode (SD) configuration.
 * Fault Queue (F0, F1) and Thermostat logic simulation.
+
 
 ---
 
