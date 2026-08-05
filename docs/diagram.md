@@ -1,6 +1,6 @@
 # TMP102 Virtual Driver Architecture
 
-This document provides a visual representation of the project architecture, dependencies, and execution flow as defined in the Kickoff document, using an ASCII art diagram style.
+This document provides a visual representation of the project architecture, dependencies, and execution flow as defined in the System Design document, using an ASCII art diagram style.
 
 ## 1. System Architecture Diagram
 

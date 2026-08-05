@@ -57,7 +57,7 @@ The project follows a strict **4-layer architecture** to ensure separation of co
 | **Layer 4** | TMP102 Emulator (`src/tmp102_sim.c`) | Virtual hardware — simulates the sensor's behavior |
 
 > For detailed architecture diagrams and data flow, see [diagram.md](file:///home/amirk/tmp102-virtual-driver/docs/diagram.md).
-> For full technical specification, see [kickoff.md](file:///home/amirk/tmp102-virtual-driver/docs/kickoff.md).
+> For full technical specification, see [system-design.md](file:///home/amirk/tmp102-virtual-driver/docs/system-design.md).
 
 ---
 

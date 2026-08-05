@@ -1,4 +1,4 @@
-# TMP102 Virtual Driver - Project Kickoff & Architecture
+# TMP102 Virtual Driver - System Design & Architecture
 
 ## References
 - [TMP102 Datasheet](tmp102.pdf)
@@ -207,7 +207,7 @@ tmp102-virtual-driver/
 ├── tests/
 │   └── test_main.c              # Test harness
 ├── docs/
-│   ├── kickoff.md               # This document
+│   ├── system-design.md          # This document
 │   ├── vision.md                # Project vision & goals
 │   ├── diagram.md               # Architecture diagrams
 │   └── tmp102.pdf               # TMP102 datasheet
