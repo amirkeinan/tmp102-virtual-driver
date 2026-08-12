@@ -57,141 +57,214 @@ The project is strictly divided into four layers to ensure modularity, portabili
 ## 3. Data Structures & State
 
 ### 3.1 Status & Error Handling
-Every driver API function returns a standard status code.
+Every driver API function returns a standard status code of type `tmp102_status_t`. This enum provides deterministic, machine-readable error reporting.
 ```c
 typedef enum {
-    TMP102_OK = 0,
-    TMP102_ERR_I2C,
-    TMP102_ERR_NULL_PTR,
-    TMP102_ERR_NOT_INITIALIZED,
-    TMP102_ERR_INVALID_PARAM,
-    TMP102_ERR_TIMEOUT
+    TMP102_OK = 0,                  // Operation completed successfully
+    TMP102_ERR_I2C,                 // I2C communication failure (HAL returned non-1)
+    TMP102_ERR_NULL_PTR,            // NULL pointer passed as argument
+    TMP102_ERR_NOT_INITIALIZED,     // Driver not initialized (tmp102_init() not called)
+    TMP102_ERR_INVALID_PARAM,       // Invalid parameter value
+    TMP102_ERR_TIMEOUT              // Operation timed out
 } tmp102_status_t;
 ```
 
+**HAL Return Value Convention:**
+- HAL functions return `1` on **success**.
+- HAL functions return a **negative value** on failure.
+- The driver maps **any non-`1` return** to `TMP102_ERR_I2C`.
+
 ### 3.2 HAL Function Pointers (Dependency Injection)
-Defines the I2C operations required by the driver. HAL functions return `1` on success, or a negative value on failure. The driver maps any non-`1` return to `TMP102_ERR_I2C`. A `void *user_data` pointer is passed through every HAL call, allowing the implementation (e.g., the Emulator) to access its own state without relying on global variables.
+The Dependency Injection mechanism. Defines the I2C operations required by the driver. A `void *user_data` pointer is passed through every HAL call, allowing the implementation (e.g., the Emulator) to access its own state without relying on global variables.
 ```c
 typedef struct {
-    // Standard Write-then-Read sequence (Repeated Start)
-    int (*i2c_write_read)(void *user_data, uint8_t addr, const uint8_t *tx_buf, size_t tx_len, uint8_t *rx_buf, size_t rx_len);
-    // Standard Write sequence
-    int (*i2c_write)(void *user_data, uint8_t addr, const uint8_t *tx_buf, size_t tx_len);
-    // Opaque user context passed to every HAL call (e.g., pointer to emulator state)
+    /**
+     * Standard Write-then-Read sequence (Repeated Start).
+     * Writes tx_len bytes from tx_buf, then reads rx_len bytes into rx_buf.
+     * Returns 1 on success, negative on failure.
+     */
+    int (*i2c_write_read)(void *user_data, uint8_t addr,
+                          const uint8_t *tx_buf, size_t tx_len,
+                          uint8_t *rx_buf, size_t rx_len);
+
+    /**
+     * Standard Write sequence.
+     * Writes tx_len bytes from tx_buf to the device at addr.
+     * Returns 1 on success, negative on failure.
+     */
+    int (*i2c_write)(void *user_data, uint8_t addr,
+                     const uint8_t *tx_buf, size_t tx_len);
+
+    /**
+     * Opaque user context passed to every HAL call.
+     * In test configuration, points to tmp102_virtual_hw_t (emulator state).
+     */
     void *user_data;
 } tmp102_hal_funcs_t;
 ```
 
 ### 3.3 Driver Context
-Represents a single sensor instance, allowing multiple sensors on the same bus.
+Represents a single sensor instance. Multiple instances can coexist on the same I2C bus (different addresses).
 ```c
 typedef struct {
-    uint8_t i2c_address;          // Default: 0x48
-    bool initialized;
+    uint8_t i2c_address;          // 7-bit I2C address (0x48–0x4B)
+    bool initialized;             // Initialization guard flag
     tmp102_hal_funcs_t hal;       // Injected I2C hardware abstraction functions
 } tmp102_driver_t;
 ```
 
 ### 3.4 Emulator State
-Represents the physical registers of the TMP102 sensor.
+Represents the physical registers and internal state of the TMP102 sensor.
 ```c
 typedef struct {
-    uint16_t temp_register;       // 0x00 - Temperature (Read-Only)
-    uint16_t config_register;     // 0x01 - Configuration (R/W)
+    // ── Hardware Registers ──
+    uint16_t temp_register;       // 0x00 — Temperature (Read-Only)
+    uint16_t config_register;     // 0x01 — Configuration (R/W)
                                   //   Power-up default: 0x60A0
-                                  //   MSB [OS=0 R1=1 R0=1 F1=0 F0=0 POL=0 TM=0 SD=0]
-                                  //   LSB [CR1=1 CR0=0 AL=1 EM=0 0 0 0 0]
-                                  //   → 12-bit resolution, 4Hz conversion, comparator mode
-    uint16_t t_low_register;      // 0x02 - T_LOW threshold (R/W, default: 0x4B00 → 75°C)
-    uint16_t t_high_register;     // 0x03 - T_HIGH threshold (R/W, default: 0x5000 → 80°C)
+                                  //   See RegistersMap.md §3.2 for full bit definitions
+    uint16_t t_low_register;      // 0x02 — T_LOW threshold (R/W, default: 0x4B00 → 75°C)
+    uint16_t t_high_register;     // 0x03 — T_HIGH threshold (R/W, default: 0x5000 → 80°C)
     uint8_t  pointer_register;    // Active register pointer (2-bit, values 0x00–0x03)
+
+    // ── Emulator Internal State ──
+    uint8_t  i2c_address;         // Emulator's own I2C slave address (0x48–0x4B)
+    uint8_t  fault_count;         // Current consecutive fault counter (for Fault Queue logic)
+    bool     alert_state;         // Current alert output state (for comparator/interrupt mode)
 } tmp102_virtual_hw_t;
 ```
 
 ---
 
-## 4. API Overview
-
-> **Note:** Full API specifications will be detailed in per-layer implementation documents. The following signatures define the high-level contract.
+## 4. API Specification
 
 ### 4.1 Driver API (`include/tmp102_driver.h`)
 ```c
-// Initialization & Lifecycle
-tmp102_status_t tmp102_init(tmp102_driver_t *dev, uint8_t i2c_address, tmp102_hal_funcs_t *hal);
+/* ── Initialization & Lifecycle ── */
 
-// Temperature Reading
-tmp102_status_t tmp102_get_temperature_celsius(tmp102_driver_t *dev, float *temp_out);
+/**
+ * @brief  Initializes a TMP102 driver instance with Dependency Injection.
+ * @param  dev          Pointer to driver context struct (caller-allocated).
+ * @param  i2c_address  7-bit I2C address (0x48–0x4B).
+ * @param  hal          Pointer to populated HAL function struct.
+ * @return TMP102_OK on success.
+ * @pre    dev != NULL, hal != NULL, hal->i2c_write_read != NULL, hal->i2c_write != NULL.
+ * @post   dev->initialized == true.
+ */
+tmp102_status_t tmp102_init(tmp102_driver_t *dev, uint8_t i2c_address,
+                            tmp102_hal_funcs_t *hal);
 
-// Configuration Register (Phase 2)
+/* ── Temperature Reading ── */
+
+/**
+ * @brief  Reads the current temperature in Celsius from the sensor.
+ *         Automatically handles 12-bit (Normal) or 13-bit (Extended) mode
+ *         based on the EM bit in the configuration register.
+ * @param  dev       Pointer to initialized driver context.
+ * @param  temp_out  Pointer to float where temperature will be stored.
+ * @return TMP102_OK on success.
+ * @pre    dev->initialized == true, temp_out != NULL.
+ */
+tmp102_status_t tmp102_get_temperature_celsius(tmp102_driver_t *dev,
+                                                float *temp_out);
+
+/* ── Configuration Register (Phase 2) ── */
+
+/**
+ * @brief  Reads the 16-bit configuration register.
+ * @param  dev         Pointer to initialized driver context.
+ * @param  config_out  Pointer to uint16_t where config value will be stored.
+ * @return TMP102_OK on success.
+ */
 tmp102_status_t tmp102_read_config(tmp102_driver_t *dev, uint16_t *config_out);
+
+/**
+ * @brief  Writes a 16-bit value to the configuration register.
+ * @param  dev     Pointer to initialized driver context.
+ * @param  config  The 16-bit configuration value to write.
+ * @return TMP102_OK on success.
+ */
 tmp102_status_t tmp102_write_config(tmp102_driver_t *dev, uint16_t config);
 
-// Alert Threshold Registers (Phase 2)
+/* ── Alert Threshold Registers (Phase 2) ── */
+
+/**
+ * @brief  Sets the T_LOW alert threshold in Celsius.
+ * @param  dev           Pointer to initialized driver context.
+ * @param  temp_celsius  Threshold temperature in °C.
+ * @return TMP102_OK on success.
+ */
 tmp102_status_t tmp102_set_t_low(tmp102_driver_t *dev, float temp_celsius);
+
+/**
+ * @brief  Sets the T_HIGH alert threshold in Celsius.
+ */
 tmp102_status_t tmp102_set_t_high(tmp102_driver_t *dev, float temp_celsius);
+
+/**
+ * @brief  Reads the current T_LOW threshold in Celsius.
+ */
 tmp102_status_t tmp102_get_t_low(tmp102_driver_t *dev, float *temp_out);
+
+/**
+ * @brief  Reads the current T_HIGH threshold in Celsius.
+ */
 tmp102_status_t tmp102_get_t_high(tmp102_driver_t *dev, float *temp_out);
 ```
 
 ### 4.2 Emulator API (`include/tmp102_sim.h`)
 ```c
-// Lifecycle
+/* ── Lifecycle ── */
+
+/**
+ * @brief  Initializes the emulator to TMP102 power-up defaults.
+ *         config=0x60A0, t_low=0x4B00, t_high=0x5000, temp=0x0000, ptr=0x00.
+ * @param  hw  Pointer to emulator state struct (caller-allocated).
+ */
 void sim_init(tmp102_virtual_hw_t *hw);
+
+/**
+ * @brief  Resets the emulator to power-up defaults (same as sim_init).
+ */
 void sim_reset(tmp102_virtual_hw_t *hw);
 
-// Backdoor — Physical condition injection
+/* ── Backdoor — Physical Condition Injection ── */
+
+/**
+ * @brief  Injects an ambient temperature into the emulator.
+ *         Converts the float to the appropriate register encoding
+ *         (12-bit or 13-bit based on EM bit) and stores in temp_register.
+ * @param  hw            Pointer to emulator state.
+ * @param  temp_celsius  Temperature to inject (°C).
+ */
 void sim_set_ambient_temperature(tmp102_virtual_hw_t *hw, float temp_celsius);
 
-// I2C handlers (injected into HAL via function pointers)
-int sim_i2c_write_read(void *user_data, uint8_t addr, const uint8_t *tx, size_t tx_len, uint8_t *rx, size_t rx_len);
-int sim_i2c_write(void *user_data, uint8_t addr, const uint8_t *tx, size_t tx_len);
+/* ── I2C Protocol Handlers (injected into HAL) ── */
+
+/**
+ * @brief  Handles I2C Write-then-Read transactions.
+ *         Updates pointer_register from tx_buf, then copies the selected
+ *         register's 2 bytes into rx_buf.
+ * @return 1 on success, negative on failure (e.g., wrong address).
+ */
+int sim_i2c_write_read(void *user_data, uint8_t addr,
+                       const uint8_t *tx, size_t tx_len,
+                       uint8_t *rx, size_t rx_len);
+
+/**
+ * @brief  Handles I2C Write transactions.
+ *         Updates pointer_register and optionally writes data to the
+ *         selected register (if writable).
+ * @return 1 on success, negative on failure.
+ */
+int sim_i2c_write(void *user_data, uint8_t addr,
+                  const uint8_t *tx, size_t tx_len);
 ```
 
 ---
 
 ## 5. Temperature Conversion
 
-The TMP102 stores temperature values in two's complement binary format with a resolution of **0.0625°C per LSB**.
-
-### 5.1 Normal Mode (12-bit)
-The temperature register (0x00) returns 2 bytes. The temperature is encoded in the upper 12 bits (bits [15:4]):
-```
-Byte 0:  [D11  D10  D9  D8  D7  D6  D5  D4]
-Byte 1:  [D3   D2   D1  D0   0   0   0   0]
-```
-**Conversion (Register → Celsius):**
-```c
-int16_t raw = (rx_buf[0] << 4) | (rx_buf[1] >> 4);
-if (raw > 0x7FF) raw |= 0xF000;   // Sign-extend 12-bit to 16-bit
-float temperature = raw * 0.0625f;
-```
-**Range:** −128°C to +127.9375°C
-
-### 5.2 Extended Mode (13-bit)
-When the EM bit in the Configuration Register is set, the temperature is encoded in the upper 13 bits (bits [15:3]):
-```
-Byte 0:  [D12  D11  D10  D9  D8  D7  D6  D5]
-Byte 1:  [D4   D3   D2   D1  D0   0   0   0]
-```
-**Conversion (Register → Celsius):**
-```c
-int16_t raw = (rx_buf[0] << 5) | (rx_buf[1] >> 3);
-if (raw > 0xFFF) raw |= 0xE000;   // Sign-extend 13-bit to 16-bit
-float temperature = raw * 0.0625f;
-```
-**Range:** −128°C to +150°C
-
-### 5.3 Temperature-to-Register (Emulator Direction)
-When the Emulator converts a float temperature to register format:
-```c
-// Normal Mode (12-bit)
-int16_t raw = (int16_t)(temp_celsius / 0.0625f);
-uint16_t reg = ((uint16_t)raw) << 4;
-
-// Extended Mode (13-bit)
-int16_t raw = (int16_t)(temp_celsius / 0.0625f);
-uint16_t reg = ((uint16_t)raw) << 3;
-```
+See [RegistersMap.md §4](RegistersMap.md#4-temperature-conversion-formulas) for conversion formulas, bit layouts, and example tables.
 
 ---
 
@@ -199,43 +272,34 @@ uint16_t reg = ((uint16_t)raw) << 3;
 ```
 tmp102-virtual-driver/
 ├── include/
-│   ├── tmp102_driver.h          # Driver public API
-│   └── tmp102_sim.h             # Emulator public API
+│   ├── tmp102_driver.h              # Driver public API & type definitions
+│   └── tmp102_sim.h                 # Emulator public API & virtual HW struct
 ├── src/
-│   ├── tmp102_driver.c          # Driver implementation
-│   └── tmp102_sim.c             # Emulator implementation
+│   ├── tmp102_driver.c              # Driver implementation (core logic)
+│   └── tmp102_sim.c                 # Emulator implementation (virtual hardware)
 ├── tests/
-│   └── test_main.c              # Test harness
+│   └── test_main.c                  # Test harness (all test scenarios)
 ├── docs/
-│   ├── system-design.md          # This document
-│   ├── vision.md                # Project vision & goals
-│   ├── diagram.md               # Architecture diagrams
-│   └── tmp102.pdf               # TMP102 datasheet
+│   ├── system-design.md              # This document
+│   ├── Implementation-Plan.md        # Technical specification & WBS
+│   ├── vision.md                    # Project vision & goals
+│   ├── diagram.md                   # Architecture diagrams (ASCII art)
+│   ├── RegistersMap.md              # TMP102 register map & technical reference
+│   └── tmp102.pdf                   # TMP102 datasheet (Texas Instruments)
 ├── .github/
 │   └── workflows/
-│       └── ci.yml               # GitHub Actions CI pipeline
-├── Makefile                     # Build system
-└── README.md                    # Project README
+│       └── ci.yml                   # GitHub Actions CI pipeline
+├── Makefile                         # Build system (all, test, clean)
+└── README.md                        # Project README
 ```
 
 ---
 
 ## 7. Implementation Phases
 
-### Phase 1: Core Functionality (MVP)
-* Setup the Build System (`Makefile`).
-* Implement the Emulator state and I2C response logic.
-* Implement Driver context initialization with Dependency Injection.
-* Support 12-bit Normal Mode temperature reading.
-* Implement error handling (`tmp102_status_t`).
-* Write unit tests for positive, negative, and fractional temperature values.
-* Setup a CI/CD pipeline (e.g., GitHub Actions) to automate testing and build processes.
+The project is delivered in two phases: **Phase 1 (MVP)** covers the build system, emulator core, driver initialization, 12-bit temperature reading, error handling, unit tests, and CI/CD. **Phase 2 (Advanced Features)** adds configuration register access, 13-bit extended mode, conversion rate/shutdown control, fault queue, and thermostat logic.
 
-### Phase 2: Advanced Features
-* Configuration Register (0x01) read/write operations.
-* Support for Extended Mode (13-bit) for temperatures > 128°C.
-* Conversion Rate (CR0, CR1) and Shutdown Mode (SD) configuration.
-* Fault Queue (F0, F1) and Thermostat logic simulation.
+See [Implementation-Plan.md §4](Implementation-Plan.md#4-implementation-work-breakdown-structure-wbs) for the detailed task breakdown, dependencies, and verification criteria.
 
 ---
 
@@ -369,10 +433,5 @@ The project uses a standard `Makefile` optimized for WSL/Linux environments.
 ---
 
 ## 10. Interaction Flow (Sequence Example: Reading Temperature)
-1. **Test Harness** calls `sim_set_ambient_temperature(25.5)`. The Emulator updates its internal `temp_register` (converting float to two's complement binary).
-2. **Test Harness** calls `tmp102_get_temperature_celsius(&my_sensor, &temp_out)`.
-3. **Driver** accesses the injected HAL: `my_sensor.hal.i2c_write_read(my_sensor.hal.user_data, 0x48, pointer_buf, 1, rx_buf, 2)`.
-4. **Emulator** intercepts the HAL call, updates its `pointer_register` to `0x00`, and copies the 2 bytes from `temp_register` into `rx_buf`.
-5. **Driver** receives the 2 raw bytes, shifts and masks the bits, applies the 0.0625°C resolution multiplier, and stores the result in `temp_out`.
-6. **Driver** returns `TMP102_OK`.
-7. **Test Harness** asserts that `temp_out == 25.5` and logs a pass/fail message.
+
+See [diagram.md §2](diagram.md#2-interaction-flow-sequence-reading-temperature) for the detailed 7-step ASCII sequence diagram showing a complete temperature read operation through all 4 layers.

@@ -47,17 +47,10 @@ This approach means the **driver code itself is identical** to what would run on
 ---
 
 ## 📐 Architecture Overview
-The project follows a strict **4-layer architecture** to ensure separation of concerns:
+The project follows a strict **4-layer architecture** (Test Harness → Driver → HAL → Emulator) to ensure separation of concerns, portability, and full testability via Dependency Injection.
 
-| Layer | Component | Role |
-|-------|-----------|------|
-| **Layer 1** | Test Harness (`tests/`) | Drives scenarios, injects data, asserts results |
-| **Layer 2** | TMP102 Driver (`src/tmp102_driver.c`) | Core logic — register parsing, API, error handling |
-| **Layer 3** | HAL (Function Pointers) | Communication bridge — abstracts I2C operations |
-| **Layer 4** | TMP102 Emulator (`src/tmp102_sim.c`) | Virtual hardware — simulates the sensor's behavior |
-
-> For detailed architecture diagrams and data flow, see [diagram.md](file:///home/amirk/tmp102-virtual-driver/docs/diagram.md).
-> For full technical specification, see [system-design.md](file:///home/amirk/tmp102-virtual-driver/docs/system-design.md).
+> For the complete architecture specification, layer descriptions, and data structures, see [system-design.md §2](system-design.md#2-system-architecture-the-4-layers).
+> For architecture diagrams and interaction flows, see [diagram.md](diagram.md).
 
 ---
 

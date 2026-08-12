@@ -1,6 +1,6 @@
 # TMP102 Virtual Driver Architecture
 
-This document provides a visual representation of the project architecture, dependencies, and execution flow as defined in the System Design document, using an ASCII art diagram style.
+This document provides a visual representation of the project architecture, dependencies, and execution flow as defined in the [System Design](system-design.md) document, using an ASCII art diagram style.
 
 ## 1. System Architecture Diagram
 
@@ -68,28 +68,83 @@ This document provides a visual representation of the project architecture, depe
 
 ## 2. Interaction Flow Sequence (Reading Temperature)
 
+Step-by-step runtime execution of a temperature read operation:
+
 ```text
  [Test Harness]                  [TMP102 Driver]                   [HAL]                    [Emulator]
        |                               |                             |                           |
-       |-- sim_set_ambient_temp() -------------------------------------------------------------->|
-       |                               |                             |                           | (Updates internal 
-       |                               |                             |                           |  register 0x00)
+  ┌────┴────────────────────────────────┴─────────────────────────────┴───────────────────────────┴──┐
+  │ STEP 1: Test injects physical condition                                                         │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────-─┘
        |                               |                             |                           |
-       |-- tmp102_get_temperature() -->|                             |                           |
+       |── sim_set_ambient_temp(25.5) ──────────────────────────────────────────────────────────>|
+       |                               |                             |          Converts 25.5°C  |
+       |                               |                             |          to 12-bit:       |
+       |                               |                             |          raw = 25.5/0.0625|
+       |                               |                             |              = 408        |
+       |                               |                             |          reg = 408 << 4   |
+       |                               |                             |              = 0x1980     |
+       |                               |                             |          Stores in        |
+       |                               |                             |          temp_register    |
        |                               |                             |                           |
-       |                               |-- hal.i2c_write_read(ud) -->|                           |
+  ┌────┴────────────────────────────────┴─────────────────────────────┴───────────────────────────┴──┐
+  │ STEP 2: Test requests temperature via Driver API                                                │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────-─┘
        |                               |                             |                           |
-       |                               |                             |-- sim_i2c_write_read(ud) ->|
-       |                               |                             |                           | (Intercepts I2C, copies
-       |                               |                             |                           |  2 bytes from 0x00)
-       |                               |                             |<-------- [raw bytes] -----|
+       |── tmp102_get_temperature() -->|                             |                           |
        |                               |                             |                           |
-       |                               |<------ [raw bytes] ---------|                           |
+       |                               | Validates: initialized?     |                           |
+       |                               |           temp_out != NULL? |                           |
        |                               |                             |                           |
-       | (Shifts/masks bits, applies   |                             |                           |
-       |  0.0625*C multiplier)         |                             |                           |
+  ┌────┴────────────────────────────────┴─────────────────────────────┴───────────────────────────┴──┐
+  │ STEP 3: Driver invokes HAL with I2C Write-then-Read                                             │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────-─┘
        |                               |                             |                           |
-       |<------ TMP102_OK (25.5) ------|                             |                           |
+       |                               |── hal.i2c_write_read(      |                           |
+       |                               |     user_data,             |                           |
+       |                               |     0x48,                  |                           |
+       |                               |     [0x00], 1,    // ptr   |                           |
+       |                               |     rx_buf, 2)   --------->|                           |
        |                               |                             |                           |
-    (Assert!)                          |                             |                           |
+  ┌────┴────────────────────────────────┴─────────────────────────────┴───────────────────────────┴──┐
+  │ STEP 4: HAL routes to Emulator (via function pointer)                                           │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────-─┘
+       |                               |                             |                           |
+       |                               |                             |── sim_i2c_write_read() -->|
+       |                               |                             |                           |
+       |                               |                             |        Checks address     |
+       |                               |                             |        Sets ptr = 0x00    |
+       |                               |                             |        Copies 2 bytes:    |
+       |                               |                             |        rx[0] = 0x19       |
+       |                               |                             |        rx[1] = 0x80       |
+       |                               |                             |                           |
+       |                               |                             |<──── return 1 (success) ──|
+       |                               |                             |                           |
+  ┌────┴────────────────────────────────┴─────────────────────────────┴───────────────────────────┴──┐
+  │ STEP 5: Driver parses raw bytes                                                                 │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────-─┘
+       |                               |                             |                           |
+       |                               | raw = (0x19 << 4) |        |                           |
+       |                               |       (0x80 >> 4)          |                           |
+       |                               |     = 0x198 = 408          |                           |
+       |                               |                             |                           |
+       |                               | 408 > 0x7FF? No → positive |                           |
+       |                               |                             |                           |
+       |                               | temp = 408 * 0.0625        |                           |
+       |                               |      = 25.5°C              |                           |
+       |                               |                             |                           |
+  ┌────┴────────────────────────────────┴─────────────────────────────┴───────────────────────────┴──┐
+  │ STEP 6: Driver returns result                                                                   │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────-─┘
+       |                               |                             |                           |
+       |<── TMP102_OK, *temp = 25.5 ──|                             |                           |
+       |                               |                             |                           |
+  ┌────┴────────────────────────────────┴─────────────────────────────┴───────────────────────────┴──┐
+  │ STEP 7: Test asserts result                                                                     │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────-─┘
+       |                               |                             |                           |
+    ASSERT(temp_out == 25.5)           |                             |                           |
+    ASSERT(status == TMP102_OK)        |                             |                           |
+       |                               |                             |                           |
+    ✅ PASS                             |                             |                           |
 ```
