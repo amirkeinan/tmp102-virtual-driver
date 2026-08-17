@@ -2,3 +2,10 @@
 heberewPlan.md
 docs/implementation_pla.review.md
 docs/answers.md
+docs/implamantionSkill.md
+
+# Agent Skills & Configurations
+.agents/
+
+# Build artifacts
+build/
