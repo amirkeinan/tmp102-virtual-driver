@@ -9,3 +9,10 @@ docs/implamantionSkill.md
 
 # Build artifacts
 build/
+
+# clangd
+.vscode/
+.clangd
+compile_flags.txt
+compile_commands.json
+
