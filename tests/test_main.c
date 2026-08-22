@@ -57,8 +57,8 @@ static int g_tests_failed = 0;
         int _exp = (int)(expected);                                            \
         int _act = (int)(actual);                                              \
         if (_exp != _act) {                                                    \
-            printf("  ASSERTION FAILED: expected %d, got %d at %s:%d\n",       \
-                   _exp, _act, __FILE__, __LINE__);                            \
+            printf("  ASSERTION FAILED: expected 0x%X (%d), got 0x%X (%d) at %s:%d\n", \
+                   _exp, _exp, _act, _act, __FILE__, __LINE__);                \
             return TEST_FAIL;                                                  \
         }                                                                      \
     } while (0)
@@ -97,6 +97,38 @@ static void setup_test_environment(tmp102_virtual_hw_t *hw,
 }
 
 /**
+ * @brief Helper for parameterizing 12-bit Normal Mode temperature conversion tests.
+ */
+static int verify_normal_mode_temperature(float input_celsius,
+                                          uint16_t expected_reg,
+                                          float expected_celsius)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    /* Inject ambient temperature via emulator backdoor */
+    sim_set_ambient_temperature(&hw, input_celsius);
+
+    /* Verify emulator register encoding (12-bit left-justified) */
+    ASSERT_EQUAL_INT(expected_reg, hw.temp_register);
+
+    /* Initialize driver instance */
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    /* Read temperature via driver and verify floating-point conversion */
+    float read_temp = 0.0f;
+    tmp102_status_t read_status = tmp102_get_temperature_celsius(&dev, &read_temp);
+    ASSERT_EQUAL_INT(TMP102_OK, read_status);
+    ASSERT_FLOAT_NEAR(expected_celsius, read_temp, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
  * @brief Mock I2C Write-then-Read function that simulates bus failure (-1).
  */
 static int mock_failing_i2c_write_read(void *user_data, uint8_t addr,
@@ -123,6 +155,146 @@ static int mock_failing_i2c_write(void *user_data, uint8_t addr,
     (void)tx_buf;
     (void)tx_len;
     return -1;
+}
+
+/* ========================================================================= */
+/* Test Cases: Temperature Reading — Normal Mode 12-bit (T01 - T17)          */
+/* ========================================================================= */
+
+/**
+ * @brief T01: Zero boundary (0.0°C -> 0x0000).
+ */
+static int test_t01_temp_zero(void)
+{
+    return verify_normal_mode_temperature(0.0f, 0x0000U, 0.0f);
+}
+
+/**
+ * @brief T02: Smallest positive step (0.0625°C -> 0x0010, LSB resolution).
+ */
+static int test_t02_temp_smallest_positive_step(void)
+{
+    return verify_normal_mode_temperature(0.0625f, 0x0010U, 0.0625f);
+}
+
+/**
+ * @brief T03: Quarter degree (0.25°C -> 0x0040).
+ */
+static int test_t03_temp_quarter_degree(void)
+{
+    return verify_normal_mode_temperature(0.25f, 0x0040U, 0.25f);
+}
+
+/**
+ * @brief T04: Half degree (0.5°C -> 0x0080).
+ */
+static int test_t04_temp_half_degree(void)
+{
+    return verify_normal_mode_temperature(0.5f, 0x0080U, 0.5f);
+}
+
+/**
+ * @brief T05: One degree (1.0°C -> 0x0100).
+ */
+static int test_t05_temp_one_degree(void)
+{
+    return verify_normal_mode_temperature(1.0f, 0x0100U, 1.0f);
+}
+
+/**
+ * @brief T06: Typical room temperature (25.0°C -> 0x1900).
+ */
+static int test_t06_temp_typical_room(void)
+{
+    return verify_normal_mode_temperature(25.0f, 0x1900U, 25.0f);
+}
+
+/**
+ * @brief T07: Room temperature fractional (25.5°C -> 0x1980).
+ */
+static int test_t07_temp_room_fractional(void)
+{
+    return verify_normal_mode_temperature(25.5f, 0x1980U, 25.5f);
+}
+
+/**
+ * @brief T08: Body temperature (37.0°C -> 0x2500).
+ */
+static int test_t08_temp_body_temperature(void)
+{
+    return verify_normal_mode_temperature(37.0f, 0x2500U, 37.0f);
+}
+
+/**
+ * @brief T09: Boiling point (100.0°C -> 0x6400).
+ */
+static int test_t09_temp_boiling_point(void)
+{
+    return verify_normal_mode_temperature(100.0f, 0x6400U, 100.0f);
+}
+
+/**
+ * @brief T10: Max normal range upper boundary (127.9375°C -> 0x7FF0).
+ */
+static int test_t10_temp_max_normal_range(void)
+{
+    return verify_normal_mode_temperature(127.9375f, 0x7FF0U, 127.9375f);
+}
+
+/**
+ * @brief T11: Smallest negative step (-0.0625°C -> 0xFFF0, two's complement boundary).
+ */
+static int test_t11_temp_smallest_negative_step(void)
+{
+    return verify_normal_mode_temperature(-0.0625f, 0xFFF0U, -0.0625f);
+}
+
+/**
+ * @brief T12: Minus one (-1.0°C -> 0xFF00).
+ */
+static int test_t12_temp_minus_one(void)
+{
+    return verify_normal_mode_temperature(-1.0f, 0xFF00U, -1.0f);
+}
+
+/**
+ * @brief T13: Negative integer (-25.0°C -> 0xE700).
+ */
+static int test_t13_temp_negative_integer(void)
+{
+    return verify_normal_mode_temperature(-25.0f, 0xE700U, -25.0f);
+}
+
+/**
+ * @brief T14: Negative fractional (-25.5°C -> 0xE680).
+ */
+static int test_t14_temp_negative_fractional(void)
+{
+    return verify_normal_mode_temperature(-25.5f, 0xE680U, -25.5f);
+}
+
+/**
+ * @brief T15: Small negative fraction (-0.5°C -> 0xFF80).
+ */
+static int test_t15_temp_small_negative_fraction(void)
+{
+    return verify_normal_mode_temperature(-0.5f, 0xFF80U, -0.5f);
+}
+
+/**
+ * @brief T16: Typical sensor min operating temp (-55.0°C -> 0xC900).
+ */
+static int test_t16_temp_typical_sensor_min(void)
+{
+    return verify_normal_mode_temperature(-55.0f, 0xC900U, -55.0f);
+}
+
+/**
+ * @brief T17: Min normal range lower boundary (-128.0°C -> 0x8000).
+ */
+static int test_t17_temp_min_normal_range(void)
+{
+    return verify_normal_mode_temperature(-128.0f, 0x8000U, -128.0f);
 }
 
 /* ========================================================================= */
@@ -436,7 +608,26 @@ int main(void)
     printf("  TMP102 Virtual Driver Test Suite — Phase 1 MVP\n");
     printf("====================================================\n\n");
 
-    printf("--- Error Handling Tests (T23 - T30) ---------------\n");
+    printf("--- Temperature Reading: Normal 12-bit (T01 - T17) -\n");
+    RUN_TEST(test_t01_temp_zero);
+    RUN_TEST(test_t02_temp_smallest_positive_step);
+    RUN_TEST(test_t03_temp_quarter_degree);
+    RUN_TEST(test_t04_temp_half_degree);
+    RUN_TEST(test_t05_temp_one_degree);
+    RUN_TEST(test_t06_temp_typical_room);
+    RUN_TEST(test_t07_temp_room_fractional);
+    RUN_TEST(test_t08_temp_body_temperature);
+    RUN_TEST(test_t09_temp_boiling_point);
+    RUN_TEST(test_t10_temp_max_normal_range);
+    RUN_TEST(test_t11_temp_smallest_negative_step);
+    RUN_TEST(test_t12_temp_minus_one);
+    RUN_TEST(test_t13_temp_negative_integer);
+    RUN_TEST(test_t14_temp_negative_fractional);
+    RUN_TEST(test_t15_temp_small_negative_fraction);
+    RUN_TEST(test_t16_temp_typical_sensor_min);
+    RUN_TEST(test_t17_temp_min_normal_range);
+
+    printf("\n--- Error Handling Tests (T23 - T30) ---------------\n");
     RUN_TEST(test_t23_null_driver_context_to_init);
     RUN_TEST(test_t24_null_hal_pointer_to_init);
     RUN_TEST(test_t25_null_temp_output_pointer);
