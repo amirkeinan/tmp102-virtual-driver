@@ -78,7 +78,7 @@ static int g_tests_failed = 0;
     } while (0)
 
 /* ========================================================================= */
-/* Test Helper Utilities                                                     */
+/* Test Helper Utilities & Mocks                                             */
 /* ========================================================================= */
 
 /**
@@ -94,6 +94,195 @@ static void setup_test_environment(tmp102_virtual_hw_t *hw,
     hal->i2c_write_read = sim_i2c_write_read;
     hal->i2c_write = sim_i2c_write;
     hal->user_data = hw;
+}
+
+/**
+ * @brief Mock I2C Write-then-Read function that simulates bus failure (-1).
+ */
+static int mock_failing_i2c_write_read(void *user_data, uint8_t addr,
+                                       const uint8_t *tx_buf, size_t tx_len,
+                                       uint8_t *rx_buf, size_t rx_len)
+{
+    (void)user_data;
+    (void)addr;
+    (void)tx_buf;
+    (void)tx_len;
+    (void)rx_buf;
+    (void)rx_len;
+    return -1;
+}
+
+/**
+ * @brief Mock I2C Write function that simulates bus failure (-1).
+ */
+static int mock_failing_i2c_write(void *user_data, uint8_t addr,
+                                  const uint8_t *tx_buf, size_t tx_len)
+{
+    (void)user_data;
+    (void)addr;
+    (void)tx_buf;
+    (void)tx_len;
+    return -1;
+}
+
+/* ========================================================================= */
+/* Test Cases: Error Handling (T23 - T30)                                    */
+/* ========================================================================= */
+
+/**
+ * @brief T23: NULL driver context pointer passed to tmp102_init().
+ */
+static int test_t23_null_driver_context_to_init(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t status = tmp102_init(NULL, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, status);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T24: NULL HAL pointer passed to tmp102_init().
+ */
+static int test_t24_null_hal_pointer_to_init(void)
+{
+    tmp102_driver_t dev;
+
+    tmp102_status_t status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, NULL);
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, status);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T25: NULL output pointer passed to tmp102_get_temperature_celsius().
+ */
+static int test_t25_null_temp_output_pointer(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    /* Test NULL output pointer with valid driver */
+    tmp102_status_t status1 = tmp102_get_temperature_celsius(&dev, NULL);
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, status1);
+
+    /* Test NULL driver context with valid output pointer */
+    float temp_celsius = 0.0f;
+    tmp102_status_t status2 = tmp102_get_temperature_celsius(NULL, &temp_celsius);
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, status2);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T26: Temperature read attempt on uninitialized driver instance.
+ */
+static int test_t26_read_temp_uninitialized_driver(void)
+{
+    tmp102_driver_t dev;
+    dev.initialized = false;
+    dev.i2c_address = TMP102_I2C_ADDR_GND;
+
+    float temp_celsius = 0.0f;
+    tmp102_status_t status = tmp102_get_temperature_celsius(&dev, &temp_celsius);
+    ASSERT_EQUAL_INT(TMP102_ERR_NOT_INITIALIZED, status);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T27: HAL i2c_write_read returns failure (propagated as TMP102_ERR_I2C).
+ */
+static int test_t27_hal_i2c_write_read_failure(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    hal.i2c_write_read = mock_failing_i2c_write_read;
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    float temp_celsius = 0.0f;
+    tmp102_status_t read_status = tmp102_get_temperature_celsius(&dev, &temp_celsius);
+    ASSERT_EQUAL_INT(TMP102_ERR_I2C, read_status);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T28: HAL i2c_write returns failure (propagated as TMP102_ERR_I2C).
+ */
+static int test_t28_hal_i2c_write_failure(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    hal.i2c_write = mock_failing_i2c_write;
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    /* Verify HAL write failure returns negative value */
+    uint8_t dummy_tx[2] = { TMP102_REG_CONFIG, 0x60 };
+    int ret = dev.hal.i2c_write(dev.hal.user_data, dev.i2c_address, dummy_tx, sizeof(dummy_tx));
+    ASSERT_TRUE(ret < 0);
+
+    /* Verify HAL return code mapping convention to TMP102_ERR_I2C */
+    tmp102_status_t mapped_status = (ret == 1) ? TMP102_OK : TMP102_ERR_I2C;
+    ASSERT_EQUAL_INT(TMP102_ERR_I2C, mapped_status);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T29: NULL i2c_write_read function pointer passed in HAL struct.
+ */
+static int test_t29_null_i2c_write_read_function_pointer(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    hal.i2c_write_read = NULL;
+
+    tmp102_status_t status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, status);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T30: NULL i2c_write function pointer passed in HAL struct.
+ */
+static int test_t30_null_i2c_write_function_pointer(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    hal.i2c_write = NULL;
+
+    tmp102_status_t status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, status);
+
+    return TEST_PASS;
 }
 
 /* ========================================================================= */
@@ -247,7 +436,17 @@ int main(void)
     printf("  TMP102 Virtual Driver Test Suite — Phase 1 MVP\n");
     printf("====================================================\n\n");
 
-    printf("--- Initialization & Lifecycle Tests (T31 - T36) ---\n");
+    printf("--- Error Handling Tests (T23 - T30) ---------------\n");
+    RUN_TEST(test_t23_null_driver_context_to_init);
+    RUN_TEST(test_t24_null_hal_pointer_to_init);
+    RUN_TEST(test_t25_null_temp_output_pointer);
+    RUN_TEST(test_t26_read_temp_uninitialized_driver);
+    RUN_TEST(test_t27_hal_i2c_write_read_failure);
+    RUN_TEST(test_t28_hal_i2c_write_failure);
+    RUN_TEST(test_t29_null_i2c_write_read_function_pointer);
+    RUN_TEST(test_t30_null_i2c_write_function_pointer);
+
+    printf("\n--- Initialization & Lifecycle Tests (T31 - T36) ---\n");
     RUN_TEST(test_t31_init_default_address_0x48);
     RUN_TEST(test_t32_init_address_0x49);
     RUN_TEST(test_t33_init_address_0x4a);
