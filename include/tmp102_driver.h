@@ -50,6 +50,22 @@ extern "C" {
 #define TMP102_CONFIG_AL_MASK       (0x0020U) /**< Alert Status (Read-Only) */
 #define TMP102_CONFIG_EM_MASK       (0x0010U) /**< Extended Mode (0=12-bit, 1=13-bit) */
 
+/** @brief Configuration Register bit-field shift positions */
+#define TMP102_CONFIG_F1_F0_SHIFT   (11U)     /**< Fault Queue field bit position */
+#define TMP102_CONFIG_CR1_CR0_SHIFT (6U)      /**< Conversion Rate field bit position */
+
+/** @brief Fault Queue field values (for use with tmp102_set_fault_queue) */
+#define TMP102_FAULT_QUEUE_1        (0x00U)   /**< 1 consecutive fault (default) */
+#define TMP102_FAULT_QUEUE_2        (0x01U)   /**< 2 consecutive faults */
+#define TMP102_FAULT_QUEUE_4        (0x02U)   /**< 4 consecutive faults */
+#define TMP102_FAULT_QUEUE_6        (0x03U)   /**< 6 consecutive faults */
+
+/** @brief Conversion Rate field values (for use with tmp102_set_conversion_rate) */
+#define TMP102_CONV_RATE_0_25HZ     (0x00U)   /**< 0.25 Hz */
+#define TMP102_CONV_RATE_1HZ        (0x01U)   /**< 1 Hz */
+#define TMP102_CONV_RATE_4HZ        (0x02U)   /**< 4 Hz (default) */
+#define TMP102_CONV_RATE_8HZ        (0x03U)   /**< 8 Hz */
+
 /* ========================================================================= */
 /* Status & Error Codes                                                      */
 /* ========================================================================= */
@@ -176,6 +192,51 @@ tmp102_status_t tmp102_read_config(tmp102_driver_t *dev, uint16_t *config_out);
  * @return TMP102_OK on success, or an error status code.
  */
 tmp102_status_t tmp102_write_config(tmp102_driver_t *dev, uint16_t config);
+
+/* ── Configuration Bit-Field Operations (Phase 2) ── */
+
+/**
+ * @brief  Sets (ORs) the specified bits in the configuration register.
+ *         Uses read-modify-write pattern: read current, OR mask, write back.
+ * @param  dev   Pointer to initialized driver context.
+ * @param  mask  Bitmask of bits to set (e.g., TMP102_CONFIG_SD_MASK).
+ * @return TMP102_OK on success, or an error status code.
+ */
+tmp102_status_t tmp102_set_config_bits(tmp102_driver_t *dev, uint16_t mask);
+
+/**
+ * @brief  Clears (ANDs ~mask) the specified bits in the configuration register.
+ *         Uses read-modify-write pattern: read current, AND ~mask, write back.
+ * @param  dev   Pointer to initialized driver context.
+ * @param  mask  Bitmask of bits to clear (e.g., TMP102_CONFIG_SD_MASK).
+ * @return TMP102_OK on success, or an error status code.
+ */
+tmp102_status_t tmp102_clear_config_bits(tmp102_driver_t *dev, uint16_t mask);
+
+/**
+ * @brief  Sets the Fault Queue field (F1:F0) in the configuration register.
+ * @param  dev    Pointer to initialized driver context.
+ * @param  value  Fault queue value (TMP102_FAULT_QUEUE_1/2/4/6, range 0–3).
+ * @return TMP102_OK on success, or an error status code.
+ */
+tmp102_status_t tmp102_set_fault_queue(tmp102_driver_t *dev, uint8_t value);
+
+/**
+ * @brief  Sets the Conversion Rate field (CR1:CR0) in the configuration register.
+ * @param  dev    Pointer to initialized driver context.
+ * @param  value  Conversion rate value (TMP102_CONV_RATE_*, range 0–3).
+ * @return TMP102_OK on success, or an error status code.
+ */
+tmp102_status_t tmp102_set_conversion_rate(tmp102_driver_t *dev, uint8_t value);
+
+/**
+ * @brief  Triggers a one-shot conversion (sets OS bit while in Shutdown mode).
+ * @param  dev  Pointer to initialized driver context.
+ * @return TMP102_OK on success, or an error status code.
+ * @note   Only meaningful when SD=1 (Shutdown mode). The OS bit is auto-cleared
+ *         by hardware after conversion completes.
+ */
+tmp102_status_t tmp102_trigger_one_shot(tmp102_driver_t *dev);
 
 /* ── Alert Threshold Registers (Phase 2) ── */
 
