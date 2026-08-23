@@ -299,6 +299,89 @@ static int test_t17_temp_min_normal_range(void)
 }
 
 /* ========================================================================= */
+/* Test Cases: Temperature Reading — Extended Mode 13-bit (T18 - T22)        */
+/* ========================================================================= */
+
+/**
+ * @brief Helper for parameterizing 13-bit Extended Mode temperature conversion tests.
+ *
+ * Enables EM bit in config register, injects temperature via emulator backdoor,
+ * verifies register encoding (13-bit left-justified), and validates driver
+ * floating-point output.
+ */
+static int verify_extended_mode_temperature(float input_celsius,
+                                            uint16_t expected_reg,
+                                            float expected_celsius)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    /* Enable Extended Mode (EM=1) in config register */
+    hw.config_register |= TMP102_CONFIG_EM_MASK;
+
+    /* Inject ambient temperature via emulator backdoor (now encodes 13-bit) */
+    sim_set_ambient_temperature(&hw, input_celsius);
+
+    /* Verify emulator register encoding (13-bit left-justified) */
+    ASSERT_EQUAL_INT(expected_reg, hw.temp_register);
+
+    /* Initialize driver instance */
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    /* Read temperature via driver and verify floating-point conversion */
+    float read_temp = 0.0f;
+    tmp102_status_t read_status = tmp102_get_temperature_celsius(&dev, &read_temp);
+    ASSERT_EQUAL_INT(TMP102_OK, read_status);
+    ASSERT_FLOAT_NEAR(expected_celsius, read_temp, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T18: Just above normal max (128.0°C -> 0x4000, first value requiring 13-bit).
+ */
+static int test_t18_temp_extended_128(void)
+{
+    return verify_extended_mode_temperature(128.0f, 0x4000U, 128.0f);
+}
+
+/**
+ * @brief T19: Extended range mid-point (140.0°C -> 0x4600).
+ */
+static int test_t19_temp_extended_140(void)
+{
+    return verify_extended_mode_temperature(140.0f, 0x4600U, 140.0f);
+}
+
+/**
+ * @brief T20: Max extended range (150.0°C -> 0x4B00, upper boundary 13-bit max).
+ */
+static int test_t20_temp_extended_150(void)
+{
+    return verify_extended_mode_temperature(150.0f, 0x4B00U, 150.0f);
+}
+
+/**
+ * @brief T21: Zero in extended mode (0.0°C -> 0x0000).
+ */
+static int test_t21_temp_extended_zero(void)
+{
+    return verify_extended_mode_temperature(0.0f, 0x0000U, 0.0f);
+}
+
+/**
+ * @brief T22: Extended negative (−128.0°C -> 0xC000, min in 13-bit encoding).
+ */
+static int test_t22_temp_extended_negative_128(void)
+{
+    return verify_extended_mode_temperature(-128.0f, 0xC000U, -128.0f);
+}
+
+/* ========================================================================= */
 /* Test Cases: Error Handling (T23 - T30)                                    */
 /* ========================================================================= */
 
@@ -881,6 +964,13 @@ int main(void)
     RUN_TEST(test_t15_temp_small_negative_fraction);
     RUN_TEST(test_t16_temp_typical_sensor_min);
     RUN_TEST(test_t17_temp_min_normal_range);
+
+    printf("\n--- Temperature Reading: Extended 13-bit (T18 - T22) -\n");
+    RUN_TEST(test_t18_temp_extended_128);
+    RUN_TEST(test_t19_temp_extended_140);
+    RUN_TEST(test_t20_temp_extended_150);
+    RUN_TEST(test_t21_temp_extended_zero);
+    RUN_TEST(test_t22_temp_extended_negative_128);
 
     printf("\n--- Error Handling Tests (T23 - T30) ---------------\n");
     RUN_TEST(test_t23_null_driver_context_to_init);
