@@ -770,6 +770,239 @@ static int test_config_api_error_handling(void)
 }
 
 /* ========================================================================= */
+/* Test Cases: Alert Threshold Registers (T55 - T62)                         */
+/* ========================================================================= */
+
+/**
+ * @brief T55: Read default T_LOW threshold (75.0°C, power-up default 0x4B00).
+ */
+static int test_t55_read_default_t_low(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    float t_low = 0.0f;
+    tmp102_status_t read_status = tmp102_get_t_low(&dev, &t_low);
+    ASSERT_EQUAL_INT(TMP102_OK, read_status);
+    ASSERT_FLOAT_NEAR(75.0f, t_low, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T56: Read default T_HIGH threshold (80.0°C, power-up default 0x5000).
+ */
+static int test_t56_read_default_t_high(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    float t_high = 0.0f;
+    tmp102_status_t read_status = tmp102_get_t_high(&dev, &t_high);
+    ASSERT_EQUAL_INT(TMP102_OK, read_status);
+    ASSERT_FLOAT_NEAR(80.0f, t_high, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T57: Set T_LOW = 50.0°C and verify read-back matches.
+ */
+static int test_t57_set_t_low_50(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    tmp102_status_t set_status = tmp102_set_t_low(&dev, 50.0f);
+    ASSERT_EQUAL_INT(TMP102_OK, set_status);
+
+    float readback = 0.0f;
+    tmp102_status_t get_status = tmp102_get_t_low(&dev, &readback);
+    ASSERT_EQUAL_INT(TMP102_OK, get_status);
+    ASSERT_FLOAT_NEAR(50.0f, readback, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T58: Set T_HIGH = 100.0°C and verify read-back matches.
+ */
+static int test_t58_set_t_high_100(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    tmp102_status_t set_status = tmp102_set_t_high(&dev, 100.0f);
+    ASSERT_EQUAL_INT(TMP102_OK, set_status);
+
+    float readback = 0.0f;
+    tmp102_status_t get_status = tmp102_get_t_high(&dev, &readback);
+    ASSERT_EQUAL_INT(TMP102_OK, get_status);
+    ASSERT_FLOAT_NEAR(100.0f, readback, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T59: Set T_LOW negative (−10.0°C) and verify read-back matches.
+ */
+static int test_t59_set_t_low_negative(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    tmp102_status_t set_status = tmp102_set_t_low(&dev, -10.0f);
+    ASSERT_EQUAL_INT(TMP102_OK, set_status);
+
+    float readback = 0.0f;
+    tmp102_status_t get_status = tmp102_get_t_low(&dev, &readback);
+    ASSERT_EQUAL_INT(TMP102_OK, get_status);
+    ASSERT_FLOAT_NEAR(-10.0f, readback, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T60: Set T_LOW = 0.0°C (zero boundary) and verify read-back matches.
+ */
+static int test_t60_set_t_low_zero(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    tmp102_status_t set_status = tmp102_set_t_low(&dev, 0.0f);
+    ASSERT_EQUAL_INT(TMP102_OK, set_status);
+
+    float readback = 999.0f;
+    tmp102_status_t get_status = tmp102_get_t_low(&dev, &readback);
+    ASSERT_EQUAL_INT(TMP102_OK, get_status);
+    ASSERT_FLOAT_NEAR(0.0f, readback, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T61: Set T_HIGH = max (127.9375°C, upper boundary) and verify read-back.
+ */
+static int test_t61_set_t_high_max(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    tmp102_status_t set_status = tmp102_set_t_high(&dev, 127.9375f);
+    ASSERT_EQUAL_INT(TMP102_OK, set_status);
+
+    float readback = 0.0f;
+    tmp102_status_t get_status = tmp102_get_t_high(&dev, &readback);
+    ASSERT_EQUAL_INT(TMP102_OK, get_status);
+    ASSERT_FLOAT_NEAR(127.9375f, readback, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T62: Set T_LOW fractional (25.5°C) and verify read-back matches.
+ */
+static int test_t62_set_t_low_fractional(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    tmp102_status_t set_status = tmp102_set_t_low(&dev, 25.5f);
+    ASSERT_EQUAL_INT(TMP102_OK, set_status);
+
+    float readback = 0.0f;
+    tmp102_status_t get_status = tmp102_get_t_low(&dev, &readback);
+    ASSERT_EQUAL_INT(TMP102_OK, get_status);
+    ASSERT_FLOAT_NEAR(25.5f, readback, 0.0001f);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief Defensive error handling tests for threshold register APIs.
+ */
+static int test_threshold_api_error_handling(void)
+{
+    tmp102_driver_t dev;
+    float temp = 0.0f;
+
+    /* Test NULL pointers */
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_set_t_low(NULL, 50.0f));
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_set_t_high(NULL, 80.0f));
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_get_t_low(NULL, &temp));
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_get_t_high(NULL, &temp));
+
+    /* Test NULL output pointers */
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_get_t_low(&dev, NULL));
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_get_t_high(&dev, NULL));
+
+    /* Test uninitialized driver */
+    tmp102_driver_t uninit_dev;
+    uninit_dev.initialized = false;
+    ASSERT_EQUAL_INT(TMP102_ERR_NOT_INITIALIZED, tmp102_set_t_low(&uninit_dev, 50.0f));
+    ASSERT_EQUAL_INT(TMP102_ERR_NOT_INITIALIZED, tmp102_set_t_high(&uninit_dev, 80.0f));
+    ASSERT_EQUAL_INT(TMP102_ERR_NOT_INITIALIZED, tmp102_get_t_low(&uninit_dev, &temp));
+    ASSERT_EQUAL_INT(TMP102_ERR_NOT_INITIALIZED, tmp102_get_t_high(&uninit_dev, &temp));
+
+    return TEST_PASS;
+}
+
+/* ========================================================================= */
 /* Test Cases: Emulator Validation (T72 - T77)                               */
 /* ========================================================================= */
 
@@ -994,6 +1227,17 @@ int main(void)
     RUN_TEST(test_t37_read_default_config);
     RUN_TEST(test_t54_write_read_config_roundtrip);
     RUN_TEST(test_config_api_error_handling);
+
+    printf("\n--- Alert Threshold Tests (T55 - T62) ---------------\n");
+    RUN_TEST(test_t55_read_default_t_low);
+    RUN_TEST(test_t56_read_default_t_high);
+    RUN_TEST(test_t57_set_t_low_50);
+    RUN_TEST(test_t58_set_t_high_100);
+    RUN_TEST(test_t59_set_t_low_negative);
+    RUN_TEST(test_t60_set_t_low_zero);
+    RUN_TEST(test_t61_set_t_high_max);
+    RUN_TEST(test_t62_set_t_low_fractional);
+    RUN_TEST(test_threshold_api_error_handling);
 
     printf("\n--- Emulator Validation Tests (T72 - T77) -----------\n");
     RUN_TEST(test_t72_emulator_init_defaults);
