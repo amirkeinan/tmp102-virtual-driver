@@ -3,7 +3,8 @@
  * @brief Unit test harness and test runner for TMP102 driver and emulator.
  *
  * Implements lightweight test framework macros and test suites for
- * driver initialization, lifecycle, error handling, and temperature reading.
+ * driver initialization, lifecycle, error handling, temperature reading,
+ * emulator validation, and configuration register operations.
  */
 
 #include <stdbool.h>
@@ -599,6 +600,93 @@ static int test_t36_read_after_successful_init(void)
 }
 
 /* ========================================================================= */
+/* Test Cases: Configuration Register (T37, T54 + Error Handling)            */
+/* ========================================================================= */
+
+/**
+ * @brief T37: Read default power-up configuration (0x60A0).
+ */
+static int test_t37_read_default_config(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    uint16_t config = 0;
+    tmp102_status_t read_status = tmp102_read_config(&dev, &config);
+    ASSERT_EQUAL_INT(TMP102_OK, read_status);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_CONFIG, config);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T54: Write and read-back full configuration register value.
+ */
+static int test_t54_write_read_config_roundtrip(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    /* Write new configuration: custom word (e.g. 0x61B0) */
+    uint16_t new_config = 0x61B0U;
+    tmp102_status_t write_status = tmp102_write_config(&dev, new_config);
+    ASSERT_EQUAL_INT(TMP102_OK, write_status);
+
+    /* Verify emulator internal register was updated */
+    ASSERT_EQUAL_INT(new_config, hw.config_register);
+
+    /* Read back via driver API and verify consistency */
+    uint16_t readback_config = 0;
+    tmp102_status_t read_status = tmp102_read_config(&dev, &readback_config);
+    ASSERT_EQUAL_INT(TMP102_OK, read_status);
+    ASSERT_EQUAL_INT(new_config, readback_config);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief Defensive error handling tests for tmp102_read_config / tmp102_write_config.
+ */
+static int test_config_api_error_handling(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+
+    /* Test NULL pointers */
+    uint16_t config = 0;
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_read_config(NULL, &config));
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_write_config(NULL, 0x60A0U));
+
+    tmp102_status_t init_status = tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+    ASSERT_EQUAL_INT(TMP102_OK, init_status);
+
+    ASSERT_EQUAL_INT(TMP102_ERR_NULL_PTR, tmp102_read_config(&dev, NULL));
+
+    /* Test uninitialized driver */
+    tmp102_driver_t uninit_dev;
+    uninit_dev.initialized = false;
+    ASSERT_EQUAL_INT(TMP102_ERR_NOT_INITIALIZED, tmp102_read_config(&uninit_dev, &config));
+    ASSERT_EQUAL_INT(TMP102_ERR_NOT_INITIALIZED, tmp102_write_config(&uninit_dev, 0x60A0U));
+
+    return TEST_PASS;
+}
+
+/* ========================================================================= */
 /* Test Cases: Emulator Validation (T72 - T77)                               */
 /* ========================================================================= */
 
@@ -772,7 +860,7 @@ static int test_t77_wrong_i2c_address_rejection(void)
 int main(void)
 {
     printf("====================================================\n");
-    printf("  TMP102 Virtual Driver Test Suite — Phase 1 MVP\n");
+    printf("  TMP102 Virtual Driver Test Suite\n");
     printf("====================================================\n\n");
 
     printf("--- Temperature Reading: Normal 12-bit (T01 - T17) -\n");
@@ -811,6 +899,11 @@ int main(void)
     RUN_TEST(test_t34_init_address_0x4b);
     RUN_TEST(test_t35_double_initialization);
     RUN_TEST(test_t36_read_after_successful_init);
+
+    printf("\n--- Configuration Register Tests (T37, T54) --------\n");
+    RUN_TEST(test_t37_read_default_config);
+    RUN_TEST(test_t54_write_read_config_roundtrip);
+    RUN_TEST(test_config_api_error_handling);
 
     printf("\n--- Emulator Validation Tests (T72 - T77) -----------\n");
     RUN_TEST(test_t72_emulator_init_defaults);
