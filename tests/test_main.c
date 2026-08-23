@@ -599,6 +599,173 @@ static int test_t36_read_after_successful_init(void)
 }
 
 /* ========================================================================= */
+/* Test Cases: Emulator Validation (T72 - T77)                               */
+/* ========================================================================= */
+
+/**
+ * @brief T72: Emulator initialization sets all power-up default register values.
+ */
+static int test_t72_emulator_init_defaults(void)
+{
+    tmp102_virtual_hw_t hw;
+    sim_init(&hw);
+
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_CONFIG, hw.config_register);     /* 0x60A0 */
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_T_LOW, hw.t_low_register);       /* 0x4B00 (75°C) */
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_T_HIGH, hw.t_high_register);     /* 0x5000 (80°C) */
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_TEMP, hw.temp_register);         /* 0x0000 (0°C) */
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_POINTER, hw.pointer_register);   /* 0x00 */
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_ADDRESS, hw.i2c_address);       /* 0x48 */
+    ASSERT_EQUAL_INT(0, hw.fault_count);
+    ASSERT_TRUE(hw.alert_state == false);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T73: Emulator reset restores all registers and internal state to defaults.
+ */
+static int test_t73_emulator_reset_defaults(void)
+{
+    tmp102_virtual_hw_t hw;
+    sim_init(&hw);
+
+    /* Mutate all registers and internal state */
+    hw.config_register = 0x1234U;
+    hw.t_low_register = 0x1111U;
+    hw.t_high_register = 0x2222U;
+    hw.temp_register = 0x3333U;
+    hw.pointer_register = 0x02U;
+    hw.fault_count = 5;
+    hw.alert_state = true;
+    hw.i2c_address = TMP102_I2C_ADDR_VCC;
+
+    /* Perform soft reset */
+    sim_reset(&hw);
+
+    /* Verify all fields are restored to clean power-up defaults */
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_CONFIG, hw.config_register);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_T_LOW, hw.t_low_register);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_T_HIGH, hw.t_high_register);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_TEMP, hw.temp_register);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_POINTER, hw.pointer_register);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_ADDRESS, hw.i2c_address);
+    ASSERT_EQUAL_INT(0, hw.fault_count);
+    ASSERT_TRUE(hw.alert_state == false);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T74: Pointer register selects corresponding register for read/write.
+ */
+static int test_t74_pointer_register_selection(void)
+{
+    tmp102_virtual_hw_t hw;
+    sim_init(&hw);
+
+    uint8_t rx_buf[2] = {0};
+    uint8_t tx_ptr[1];
+
+    /* Select and read Configuration register (0x01) */
+    tx_ptr[0] = TMP102_REG_CONFIG;
+    int ret1 = sim_i2c_write_read(&hw, TMP102_DEFAULT_ADDRESS, tx_ptr, 1, rx_buf, 2);
+    ASSERT_EQUAL_INT(1, ret1);
+    uint16_t config_val = (uint16_t)(((uint16_t)rx_buf[0] << 8) | rx_buf[1]);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_CONFIG, config_val);
+    ASSERT_EQUAL_INT(TMP102_REG_CONFIG, hw.pointer_register);
+
+    /* Select and read T_LOW register (0x02) */
+    tx_ptr[0] = TMP102_REG_T_LOW;
+    int ret2 = sim_i2c_write_read(&hw, TMP102_DEFAULT_ADDRESS, tx_ptr, 1, rx_buf, 2);
+    ASSERT_EQUAL_INT(1, ret2);
+    uint16_t t_low_val = (uint16_t)(((uint16_t)rx_buf[0] << 8) | rx_buf[1]);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_T_LOW, t_low_val);
+    ASSERT_EQUAL_INT(TMP102_REG_T_LOW, hw.pointer_register);
+
+    /* Select and read T_HIGH register (0x03) */
+    tx_ptr[0] = TMP102_REG_T_HIGH;
+    int ret3 = sim_i2c_write_read(&hw, TMP102_DEFAULT_ADDRESS, tx_ptr, 1, rx_buf, 2);
+    ASSERT_EQUAL_INT(1, ret3);
+    uint16_t t_high_val = (uint16_t)(((uint16_t)rx_buf[0] << 8) | rx_buf[1]);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_T_HIGH, t_high_val);
+    ASSERT_EQUAL_INT(TMP102_REG_T_HIGH, hw.pointer_register);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T75: Invalid pointer register value handled gracefully.
+ */
+static int test_t75_invalid_pointer_handling(void)
+{
+    tmp102_virtual_hw_t hw;
+    sim_init(&hw);
+
+    uint8_t invalid_ptr[1] = { 0x04 }; /* Valid pointer range is 0x00 - 0x03 */
+    uint8_t rx_buf[2] = {0};
+
+    /* Invalid pointer in write transaction */
+    int ret_write = sim_i2c_write(&hw, TMP102_DEFAULT_ADDRESS, invalid_ptr, 1);
+    ASSERT_EQUAL_INT(-1, ret_write);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_POINTER, hw.pointer_register);
+
+    /* Invalid pointer in write-then-read transaction */
+    int ret_wr_rd = sim_i2c_write_read(&hw, TMP102_DEFAULT_ADDRESS, invalid_ptr, 1, rx_buf, 2);
+    ASSERT_EQUAL_INT(-1, ret_wr_rd);
+    ASSERT_EQUAL_INT(TMP102_DEFAULT_POINTER, hw.pointer_register);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T76: Write to read-only temperature register is ignored / protected.
+ */
+static int test_t76_readonly_temp_register_protection(void)
+{
+    tmp102_virtual_hw_t hw;
+    sim_init(&hw);
+
+    /* Set known temperature (25.0°C -> 0x1900) */
+    sim_set_ambient_temperature(&hw, 25.0f);
+    ASSERT_EQUAL_INT(0x1900U, hw.temp_register);
+
+    /* Attempt to overwrite Temperature register (0x00) via I2C write */
+    uint8_t write_payload[3] = { TMP102_REG_TEMP, 0x7F, 0xF0 };
+    int ret = sim_i2c_write(&hw, TMP102_DEFAULT_ADDRESS, write_payload, sizeof(write_payload));
+
+    ASSERT_EQUAL_INT(1, ret);
+    /* Value must remain 0x1900 without modification */
+    ASSERT_EQUAL_INT(0x1900U, hw.temp_register);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T77: Transactions targeted at wrong I2C address are rejected.
+ */
+static int test_t77_wrong_i2c_address_rejection(void)
+{
+    tmp102_virtual_hw_t hw;
+    sim_init(&hw); /* Address = 0x48 */
+
+    uint8_t tx_buf[1] = { TMP102_REG_TEMP };
+    uint8_t rx_buf[2] = {0};
+
+    /* Transactions to wrong addresses (0x49, 0x4A, 0x4B, 0x00) must return failure (-1) */
+    int ret1 = sim_i2c_write_read(&hw, TMP102_I2C_ADDR_VCC, tx_buf, 1, rx_buf, 2);
+    ASSERT_EQUAL_INT(-1, ret1);
+
+    int ret2 = sim_i2c_write(&hw, TMP102_I2C_ADDR_VCC, tx_buf, 1);
+    ASSERT_EQUAL_INT(-1, ret2);
+
+    int ret3 = sim_i2c_write_read(&hw, 0x00U, tx_buf, 1, rx_buf, 2);
+    ASSERT_EQUAL_INT(-1, ret3);
+
+    return TEST_PASS;
+}
+
+/* ========================================================================= */
 /* Main Test Runner                                                          */
 /* ========================================================================= */
 
@@ -644,6 +811,14 @@ int main(void)
     RUN_TEST(test_t34_init_address_0x4b);
     RUN_TEST(test_t35_double_initialization);
     RUN_TEST(test_t36_read_after_successful_init);
+
+    printf("\n--- Emulator Validation Tests (T72 - T77) -----------\n");
+    RUN_TEST(test_t72_emulator_init_defaults);
+    RUN_TEST(test_t73_emulator_reset_defaults);
+    RUN_TEST(test_t74_pointer_register_selection);
+    RUN_TEST(test_t75_invalid_pointer_handling);
+    RUN_TEST(test_t76_readonly_temp_register_protection);
+    RUN_TEST(test_t77_wrong_i2c_address_rejection);
 
     printf("\n====================================================\n");
     printf("  Test Summary: %d Run | %d Passed | %d Failed\n",
