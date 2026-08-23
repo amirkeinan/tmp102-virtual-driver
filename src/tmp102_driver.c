@@ -181,6 +181,74 @@ tmp102_status_t tmp102_write_config(tmp102_driver_t *dev, uint16_t config)
 }
 
 /* ========================================================================= */
+/* Configuration Bit-Field Operations API                                     */
+/* ========================================================================= */
+
+tmp102_status_t tmp102_set_config_bits(tmp102_driver_t *dev, uint16_t mask)
+{
+    /* Read current configuration */
+    uint16_t config = 0;
+    tmp102_status_t status = tmp102_read_config(dev, &config);
+    if (status != TMP102_OK) {
+        return status;
+    }
+
+    /* Set specified bits and write back */
+    config |= mask;
+    return tmp102_write_config(dev, config);
+}
+
+tmp102_status_t tmp102_clear_config_bits(tmp102_driver_t *dev, uint16_t mask)
+{
+    /* Read current configuration */
+    uint16_t config = 0;
+    tmp102_status_t status = tmp102_read_config(dev, &config);
+    if (status != TMP102_OK) {
+        return status;
+    }
+
+    /* Clear specified bits and write back */
+    config &= (uint16_t)(~mask);
+    return tmp102_write_config(dev, config);
+}
+
+tmp102_status_t tmp102_set_fault_queue(tmp102_driver_t *dev, uint8_t value)
+{
+    /* Read current configuration */
+    uint16_t config = 0;
+    tmp102_status_t status = tmp102_read_config(dev, &config);
+    if (status != TMP102_OK) {
+        return status;
+    }
+
+    /* Clear the F1:F0 field, then set the new value */
+    config &= (uint16_t)(~TMP102_CONFIG_F1_F0_MASK);
+    config |= (uint16_t)(((uint16_t)value & 0x03U) << TMP102_CONFIG_F1_F0_SHIFT);
+    return tmp102_write_config(dev, config);
+}
+
+tmp102_status_t tmp102_set_conversion_rate(tmp102_driver_t *dev, uint8_t value)
+{
+    /* Read current configuration */
+    uint16_t config = 0;
+    tmp102_status_t status = tmp102_read_config(dev, &config);
+    if (status != TMP102_OK) {
+        return status;
+    }
+
+    /* Clear the CR1:CR0 field, then set the new value */
+    config &= (uint16_t)(~TMP102_CONFIG_CR1_CR0_MASK);
+    config |= (uint16_t)(((uint16_t)value & 0x03U) << TMP102_CONFIG_CR1_CR0_SHIFT);
+    return tmp102_write_config(dev, config);
+}
+
+tmp102_status_t tmp102_trigger_one_shot(tmp102_driver_t *dev)
+{
+    /* Set the OS bit to trigger a single conversion in Shutdown mode */
+    return tmp102_set_config_bits(dev, TMP102_CONFIG_OS_MASK);
+}
+
+/* ========================================================================= */
 /* Alert Threshold Registers API                                              */
 /* ========================================================================= */
 

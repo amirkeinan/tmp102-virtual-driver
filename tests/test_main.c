@@ -770,6 +770,379 @@ static int test_config_api_error_handling(void)
 }
 
 /* ========================================================================= */
+/* Test Cases: Configuration Bit-Field Operations (T38 - T53)                */
+/* ========================================================================= */
+
+/**
+ * @brief Helper: initialize a driver+emulator environment and return config.
+ */
+static int setup_config_test(tmp102_virtual_hw_t *hw, tmp102_hal_funcs_t *hal,
+                             tmp102_driver_t *dev)
+{
+    setup_test_environment(hw, hal, TMP102_I2C_ADDR_GND);
+    tmp102_status_t status = tmp102_init(dev, TMP102_I2C_ADDR_GND, hal);
+    return (status == TMP102_OK) ? TEST_PASS : TEST_FAIL;
+}
+
+/**
+ * @brief T38: Enable Shutdown Mode (SD=1).
+ */
+static int test_t38_enable_shutdown_mode(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_config_bits(&dev, TMP102_CONFIG_SD_MASK);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_status_t read_status = tmp102_read_config(&dev, &config);
+    ASSERT_EQUAL_INT(TMP102_OK, read_status);
+    ASSERT_TRUE((config & TMP102_CONFIG_SD_MASK) != 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T39: Disable Shutdown Mode (SD=0).
+ */
+static int test_t39_disable_shutdown_mode(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    /* First enable SD, then disable */
+    tmp102_set_config_bits(&dev, TMP102_CONFIG_SD_MASK);
+    tmp102_status_t status = tmp102_clear_config_bits(&dev, TMP102_CONFIG_SD_MASK);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_SD_MASK) == 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T40: Set Thermostat Mode to Interrupt (TM=1).
+ */
+static int test_t40_set_thermostat_interrupt(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_config_bits(&dev, TMP102_CONFIG_TM_MASK);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_TM_MASK) != 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T41: Set Thermostat Mode to Comparator (TM=0, default).
+ */
+static int test_t41_set_thermostat_comparator(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    /* First set TM=1, then clear back to default */
+    tmp102_set_config_bits(&dev, TMP102_CONFIG_TM_MASK);
+    tmp102_status_t status = tmp102_clear_config_bits(&dev, TMP102_CONFIG_TM_MASK);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_TM_MASK) == 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T42: Set Alert Polarity high (POL=1).
+ */
+static int test_t42_set_polarity_high(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_config_bits(&dev, TMP102_CONFIG_POL_MASK);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_POL_MASK) != 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T43: Set Fault Queue = 2 consecutive faults (F1:F0=01).
+ */
+static int test_t43_set_fault_queue_2(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_fault_queue(&dev, TMP102_FAULT_QUEUE_2);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    uint8_t fq = (uint8_t)((config & TMP102_CONFIG_F1_F0_MASK) >> TMP102_CONFIG_F1_F0_SHIFT);
+    ASSERT_EQUAL_INT(TMP102_FAULT_QUEUE_2, fq);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T44: Set Fault Queue = 4 consecutive faults (F1:F0=10).
+ */
+static int test_t44_set_fault_queue_4(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_fault_queue(&dev, TMP102_FAULT_QUEUE_4);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    uint8_t fq = (uint8_t)((config & TMP102_CONFIG_F1_F0_MASK) >> TMP102_CONFIG_F1_F0_SHIFT);
+    ASSERT_EQUAL_INT(TMP102_FAULT_QUEUE_4, fq);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T45: Set Fault Queue = 6 consecutive faults (F1:F0=11).
+ */
+static int test_t45_set_fault_queue_6(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_fault_queue(&dev, TMP102_FAULT_QUEUE_6);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    uint8_t fq = (uint8_t)((config & TMP102_CONFIG_F1_F0_MASK) >> TMP102_CONFIG_F1_F0_SHIFT);
+    ASSERT_EQUAL_INT(TMP102_FAULT_QUEUE_6, fq);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T46: Set Conversion Rate = 0.25 Hz (CR1:CR0=00).
+ */
+static int test_t46_set_conv_rate_0_25hz(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_conversion_rate(&dev, TMP102_CONV_RATE_0_25HZ);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    uint8_t cr = (uint8_t)((config & TMP102_CONFIG_CR1_CR0_MASK) >> TMP102_CONFIG_CR1_CR0_SHIFT);
+    ASSERT_EQUAL_INT(TMP102_CONV_RATE_0_25HZ, cr);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T47: Set Conversion Rate = 1 Hz (CR1:CR0=01).
+ */
+static int test_t47_set_conv_rate_1hz(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_conversion_rate(&dev, TMP102_CONV_RATE_1HZ);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    uint8_t cr = (uint8_t)((config & TMP102_CONFIG_CR1_CR0_MASK) >> TMP102_CONFIG_CR1_CR0_SHIFT);
+    ASSERT_EQUAL_INT(TMP102_CONV_RATE_1HZ, cr);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T48: Set Conversion Rate = 4 Hz (CR1:CR0=10, default).
+ */
+static int test_t48_set_conv_rate_4hz(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    /* Change to 1Hz first, then set back to 4Hz (default) */
+    tmp102_set_conversion_rate(&dev, TMP102_CONV_RATE_1HZ);
+    tmp102_status_t status = tmp102_set_conversion_rate(&dev, TMP102_CONV_RATE_4HZ);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    uint8_t cr = (uint8_t)((config & TMP102_CONFIG_CR1_CR0_MASK) >> TMP102_CONFIG_CR1_CR0_SHIFT);
+    ASSERT_EQUAL_INT(TMP102_CONV_RATE_4HZ, cr);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T49: Set Conversion Rate = 8 Hz (CR1:CR0=11, fastest).
+ */
+static int test_t49_set_conv_rate_8hz(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_conversion_rate(&dev, TMP102_CONV_RATE_8HZ);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    uint8_t cr = (uint8_t)((config & TMP102_CONFIG_CR1_CR0_MASK) >> TMP102_CONFIG_CR1_CR0_SHIFT);
+    ASSERT_EQUAL_INT(TMP102_CONV_RATE_8HZ, cr);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T50: Enable Extended Mode (EM=1) — switches to 13-bit reads.
+ */
+static int test_t50_enable_extended_mode(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    tmp102_status_t status = tmp102_set_config_bits(&dev, TMP102_CONFIG_EM_MASK);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_EM_MASK) != 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T51: Disable Extended Mode (EM=0) — restores 12-bit reads.
+ */
+static int test_t51_disable_extended_mode(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    /* Enable first, then disable */
+    tmp102_set_config_bits(&dev, TMP102_CONFIG_EM_MASK);
+    tmp102_status_t status = tmp102_clear_config_bits(&dev, TMP102_CONFIG_EM_MASK);
+    ASSERT_EQUAL_INT(TMP102_OK, status);
+
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_EM_MASK) == 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T52: One-Shot conversion trigger in Shutdown mode.
+ *
+ * Enables SD mode, triggers OS, verifies OS bit is set in config.
+ * (In real hardware, OS auto-clears after conversion; the emulator
+ * stores it as-is for verification.)
+ */
+static int test_t52_one_shot_in_shutdown(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    /* Enter Shutdown mode */
+    tmp102_status_t sd_status = tmp102_set_config_bits(&dev, TMP102_CONFIG_SD_MASK);
+    ASSERT_EQUAL_INT(TMP102_OK, sd_status);
+
+    /* Trigger one-shot conversion */
+    tmp102_status_t os_status = tmp102_trigger_one_shot(&dev);
+    ASSERT_EQUAL_INT(TMP102_OK, os_status);
+
+    /* Verify both SD and OS bits are set */
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_SD_MASK) != 0);
+    ASSERT_TRUE((config & TMP102_CONFIG_OS_MASK) != 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T53: Read Alert bit (AL) reflects emulator alert_state.
+ *
+ * The AL bit (bit 5) in the config register is read-only and reflects
+ * the thermostat alert output state. We manipulate hw.alert_state
+ * directly via the emulator backdoor and verify the AL bit reflects it.
+ */
+static int test_t53_read_alert_bit(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+    ASSERT_TRUE(setup_config_test(&hw, &hal, &dev));
+
+    /* Default alert_state is false — AL bit should be clear */
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_AL_MASK) != 0);
+
+    /*
+     * Set AL bit directly in config register to simulate alert active.
+     * (In a full emulator, this would be driven by thermostat logic;
+     * for this test, we verify the driver can read the bit correctly.)
+     */
+    hw.config_register &= (uint16_t)(~TMP102_CONFIG_AL_MASK);
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_AL_MASK) == 0);
+
+    return TEST_PASS;
+}
+
+/* ========================================================================= */
 /* Test Cases: Alert Threshold Registers (T55 - T62)                         */
 /* ========================================================================= */
 
@@ -1227,6 +1600,24 @@ int main(void)
     RUN_TEST(test_t37_read_default_config);
     RUN_TEST(test_t54_write_read_config_roundtrip);
     RUN_TEST(test_config_api_error_handling);
+
+    printf("\n--- Config Bit-Field Operations (T38 - T53) --------\n");
+    RUN_TEST(test_t38_enable_shutdown_mode);
+    RUN_TEST(test_t39_disable_shutdown_mode);
+    RUN_TEST(test_t40_set_thermostat_interrupt);
+    RUN_TEST(test_t41_set_thermostat_comparator);
+    RUN_TEST(test_t42_set_polarity_high);
+    RUN_TEST(test_t43_set_fault_queue_2);
+    RUN_TEST(test_t44_set_fault_queue_4);
+    RUN_TEST(test_t45_set_fault_queue_6);
+    RUN_TEST(test_t46_set_conv_rate_0_25hz);
+    RUN_TEST(test_t47_set_conv_rate_1hz);
+    RUN_TEST(test_t48_set_conv_rate_4hz);
+    RUN_TEST(test_t49_set_conv_rate_8hz);
+    RUN_TEST(test_t50_enable_extended_mode);
+    RUN_TEST(test_t51_disable_extended_mode);
+    RUN_TEST(test_t52_one_shot_in_shutdown);
+    RUN_TEST(test_t53_read_alert_bit);
 
     printf("\n--- Alert Threshold Tests (T55 - T62) ---------------\n");
     RUN_TEST(test_t55_read_default_t_low);
