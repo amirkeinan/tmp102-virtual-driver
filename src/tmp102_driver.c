@@ -56,6 +56,16 @@ tmp102_status_t tmp102_get_temperature_celsius(tmp102_driver_t *dev,
         return TMP102_ERR_NOT_INITIALIZED;
     }
 
+    /*
+     * Read the Configuration Register to detect Extended Mode (EM) bit.
+     * EM=0: Normal 12-bit mode, EM=1: Extended 13-bit mode.
+     */
+    uint16_t config = 0;
+    tmp102_status_t cfg_status = tmp102_read_config(dev, &config);
+    if (cfg_status != TMP102_OK) {
+        return cfg_status;
+    }
+
     /* Write pointer register for Temperature (0x00) and read 2 bytes */
     uint8_t tx_buf[1] = { TMP102_REG_TEMP };
     uint8_t rx_buf[2] = { 0, 0 };
@@ -73,15 +83,30 @@ tmp102_status_t tmp102_get_temperature_celsius(tmp102_driver_t *dev,
      */
     uint16_t raw = (uint16_t)(((uint16_t)rx_buf[0] << 8) | (uint16_t)rx_buf[1]);
 
-    /*
-     * Extract 12-bit Normal Mode value:
-     * Shift right by 4 bits to obtain 12-bit count.
-     */
-    int16_t count = (int16_t)(raw >> 4);
+    int16_t count;
 
-    /* Sign-extend if negative (bit 11 is sign bit) */
-    if ((count & 0x0800) != 0) {
-        count = (int16_t)(count | (int16_t)0xF000);
+    if ((config & TMP102_CONFIG_EM_MASK) != 0U) {
+        /*
+         * Extended Mode (13-bit): data is left-justified in bits 15..3.
+         * Shift right by 3 bits to obtain 13-bit count.
+         */
+        count = (int16_t)(raw >> 3);
+
+        /* Sign-extend if negative (bit 12 is sign bit in 13-bit mode) */
+        if ((count & 0x1000) != 0) {
+            count = (int16_t)(count | (int16_t)0xE000);
+        }
+    } else {
+        /*
+         * Normal Mode (12-bit): data is left-justified in bits 15..4.
+         * Shift right by 4 bits to obtain 12-bit count.
+         */
+        count = (int16_t)(raw >> 4);
+
+        /* Sign-extend if negative (bit 11 is sign bit in 12-bit mode) */
+        if ((count & 0x0800) != 0) {
+            count = (int16_t)(count | (int16_t)0xF000);
+        }
     }
 
     /* Multiply count by temperature resolution (0.0625°C / LSB) */
