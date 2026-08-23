@@ -1376,6 +1376,264 @@ static int test_threshold_api_error_handling(void)
 }
 
 /* ========================================================================= */
+/* Test Cases: Thermostat & Alert Logic (T63 - T71)                          */
+/* ========================================================================= */
+
+/**
+ * @brief T63: Comparator mode — temp > T_HIGH asserts alert.
+ *
+ * Default: T_HIGH=80°C, T_LOW=75°C, TM=0 (comparator), POL=0 (active low).
+ * Inject temp=85°C (> T_HIGH). Alert should assert → AL=0 (active low).
+ */
+static int test_t63_comparator_above_t_high(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* Inject temperature above T_HIGH */
+    sim_set_ambient_temperature(&hw, 85.0f);
+
+    /* Alert should be asserted */
+    ASSERT_TRUE(hw.alert_state == true);
+
+    /* AL bit should be 0 (POL=0, active low) */
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_AL_MASK) == 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T64: Comparator mode — temp < T_LOW de-asserts alert.
+ *
+ * First trigger alert (temp > T_HIGH), then cool down below T_LOW.
+ * Alert should de-assert → AL=1 (active low, no alert).
+ */
+static int test_t64_comparator_below_t_low(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* First trigger alert */
+    sim_set_ambient_temperature(&hw, 85.0f);
+    ASSERT_TRUE(hw.alert_state == true);
+
+    /* Cool down below T_LOW (75°C) */
+    sim_set_ambient_temperature(&hw, 70.0f);
+
+    /* Alert should be de-asserted */
+    ASSERT_TRUE(hw.alert_state == false);
+
+    /* AL bit should be 1 (POL=0, no alert) */
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_AL_MASK) != 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T65: Comparator mode — temp in hysteresis band holds previous state.
+ *
+ * After alert triggers at 85°C, temp drops to 77°C (between T_LOW=75 and
+ * T_HIGH=80). Alert state should remain asserted (hysteresis).
+ */
+static int test_t65_comparator_hysteresis(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* Trigger alert */
+    sim_set_ambient_temperature(&hw, 85.0f);
+    ASSERT_TRUE(hw.alert_state == true);
+
+    /* Drop to hysteresis band (between T_LOW=75 and T_HIGH=80) */
+    sim_set_ambient_temperature(&hw, 77.0f);
+
+    /* Alert should remain asserted (hysteresis holds) */
+    ASSERT_TRUE(hw.alert_state == true);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T66: Interrupt mode — temp > T_HIGH triggers alert.
+ */
+static int test_t66_interrupt_above_t_high(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* Enable interrupt mode (TM=1) */
+    tmp102_set_config_bits(&dev, TMP102_CONFIG_TM_MASK);
+
+    /* Inject temperature above T_HIGH */
+    sim_set_ambient_temperature(&hw, 85.0f);
+
+    /* Alert should be triggered */
+    ASSERT_TRUE(hw.alert_state == true);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T67: Interrupt mode — reading config register clears alert.
+ *
+ * After alert triggers, reading config should acknowledge/clear the alert.
+ */
+static int test_t67_interrupt_read_clears_alert(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* Enable interrupt mode (TM=1) */
+    tmp102_set_config_bits(&dev, TMP102_CONFIG_TM_MASK);
+
+    /* Trigger alert */
+    sim_set_ambient_temperature(&hw, 85.0f);
+    ASSERT_TRUE(hw.alert_state == true);
+
+    /* Read config register — should clear the alert */
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+
+    /* Alert should now be cleared */
+    ASSERT_TRUE(hw.alert_state == false);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T68: Fault Queue=2 — single fault does NOT trigger alert.
+ *
+ * Set F1:F0=01 (2 faults required). One reading above T_HIGH should
+ * not yet trigger the alert.
+ */
+static int test_t68_fault_queue_single_no_trigger(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* Set fault queue to 2 */
+    tmp102_set_fault_queue(&dev, TMP102_FAULT_QUEUE_2);
+
+    /* Single temperature reading above T_HIGH */
+    sim_set_ambient_temperature(&hw, 85.0f);
+
+    /* Alert should NOT be triggered (only 1 fault, need 2) */
+    ASSERT_TRUE(hw.alert_state == false);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T69: Fault Queue=2 — two consecutive faults trigger alert.
+ *
+ * Set F1:F0=01 (2 faults required). Two consecutive readings above T_HIGH
+ * should trigger the alert.
+ */
+static int test_t69_fault_queue_two_faults_trigger(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* Set fault queue to 2 */
+    tmp102_set_fault_queue(&dev, TMP102_FAULT_QUEUE_2);
+
+    /* First reading above T_HIGH */
+    sim_set_ambient_temperature(&hw, 85.0f);
+    ASSERT_TRUE(hw.alert_state == false);
+
+    /* Second consecutive reading above T_HIGH */
+    sim_set_ambient_temperature(&hw, 86.0f);
+    ASSERT_TRUE(hw.alert_state == true);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T70: Polarity active high (POL=1) — temp > T_HIGH → alert_state=true, AL=1.
+ */
+static int test_t70_polarity_active_high(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* Set polarity to active high */
+    tmp102_set_config_bits(&dev, TMP102_CONFIG_POL_MASK);
+
+    /* Trigger alert */
+    sim_set_ambient_temperature(&hw, 85.0f);
+    ASSERT_TRUE(hw.alert_state == true);
+
+    /* With POL=1 (active high), alert_state=true → AL=1 */
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_AL_MASK) != 0);
+
+    return TEST_PASS;
+}
+
+/**
+ * @brief T71: Polarity active low (POL=0, default) — temp > T_HIGH → alert_state=true, AL=0.
+ */
+static int test_t71_polarity_active_low(void)
+{
+    tmp102_virtual_hw_t hw;
+    tmp102_hal_funcs_t hal;
+    tmp102_driver_t dev;
+
+    setup_test_environment(&hw, &hal, TMP102_I2C_ADDR_GND);
+    tmp102_init(&dev, TMP102_I2C_ADDR_GND, &hal);
+
+    /* Default: POL=0 (active low) */
+
+    /* Trigger alert */
+    sim_set_ambient_temperature(&hw, 85.0f);
+    ASSERT_TRUE(hw.alert_state == true);
+
+    /* With POL=0 (active low), alert_state=true → AL=0 */
+    uint16_t config = 0;
+    tmp102_read_config(&dev, &config);
+    ASSERT_TRUE((config & TMP102_CONFIG_AL_MASK) == 0);
+
+    return TEST_PASS;
+}
+
+/* ========================================================================= */
 /* Test Cases: Emulator Validation (T72 - T77)                               */
 /* ========================================================================= */
 
@@ -1629,6 +1887,17 @@ int main(void)
     RUN_TEST(test_t61_set_t_high_max);
     RUN_TEST(test_t62_set_t_low_fractional);
     RUN_TEST(test_threshold_api_error_handling);
+
+    printf("\n--- Thermostat & Alert Logic (T63 - T71) ------------\n");
+    RUN_TEST(test_t63_comparator_above_t_high);
+    RUN_TEST(test_t64_comparator_below_t_low);
+    RUN_TEST(test_t65_comparator_hysteresis);
+    RUN_TEST(test_t66_interrupt_above_t_high);
+    RUN_TEST(test_t67_interrupt_read_clears_alert);
+    RUN_TEST(test_t68_fault_queue_single_no_trigger);
+    RUN_TEST(test_t69_fault_queue_two_faults_trigger);
+    RUN_TEST(test_t70_polarity_active_high);
+    RUN_TEST(test_t71_polarity_active_low);
 
     printf("\n--- Emulator Validation Tests (T72 - T77) -----------\n");
     RUN_TEST(test_t72_emulator_init_defaults);
