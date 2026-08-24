@@ -13,6 +13,27 @@
 /* Initialization & Lifecycle API                                            */
 /* ========================================================================= */
 
+/**
+ * @brief Initialize a TMP102 driver instance via Dependency Injection.
+ *
+ * Validates all input parameters and stores the HAL function table inside
+ * the driver context. After a successful call the driver is ready to
+ * communicate with the sensor over I2C.
+ *
+ * @param[out] dev          Caller-allocated driver context to initialize.
+ * @param[in]  i2c_address  7-bit I2C slave address (0x48 – 0x4B).
+ * @param[in]  hal          HAL function table; i2c_write_read and
+ *                          i2c_write must be non-NULL.
+ *
+ * @return TMP102_OK              on success.
+ * @return TMP102_ERR_NULL_PTR    if @p dev, @p hal, or a mandatory HAL
+ *                                function pointer is NULL.
+ * @return TMP102_ERR_INVALID_PARAM if @p i2c_address is outside the
+ *                                valid range (0x48 – 0x4B).
+ *
+ * @note The function performs a shallow copy of @p hal, so the caller
+ *       does not need to keep the original struct alive after the call.
+ */
 tmp102_status_t tmp102_init(tmp102_driver_t *dev, uint8_t i2c_address,
                             const tmp102_hal_funcs_t *hal)
 {
@@ -43,6 +64,23 @@ tmp102_status_t tmp102_init(tmp102_driver_t *dev, uint8_t i2c_address,
 /* Temperature Reading API                                                   */
 /* ========================================================================= */
 
+/**
+ * @brief Read the current temperature from the TMP102 sensor.
+ *
+ * The function first reads the Configuration Register to determine
+ * whether the sensor is in Normal (12-bit) or Extended (13-bit) mode,
+ * then reads the Temperature Register and converts the raw two's
+ * complement value to degrees Celsius.
+ *
+ * @param[in]  dev       Pointer to an initialized driver context.
+ * @param[out] temp_out  Receives the temperature in °C
+ *                       (resolution 0.0625 °C / LSB).
+ *
+ * @return TMP102_OK                on success.
+ * @return TMP102_ERR_NULL_PTR      if @p dev or @p temp_out is NULL.
+ * @return TMP102_ERR_NOT_INITIALIZED if the driver has not been initialized.
+ * @return TMP102_ERR_I2C           if an I2C transaction fails.
+ */
 tmp102_status_t tmp102_get_temperature_celsius(tmp102_driver_t *dev,
                                                 float *temp_out)
 {
@@ -119,6 +157,20 @@ tmp102_status_t tmp102_get_temperature_celsius(tmp102_driver_t *dev,
 /* Configuration Register Access API                                         */
 /* ========================================================================= */
 
+/**
+ * @brief Read the 16-bit Configuration Register from the TMP102.
+ *
+ * Sends the Configuration Register pointer (0x01) and reads the two
+ * result bytes in Big-Endian order.
+ *
+ * @param[in]  dev         Pointer to an initialized driver context.
+ * @param[out] config_out  Receives the raw 16-bit config register value.
+ *
+ * @return TMP102_OK                on success.
+ * @return TMP102_ERR_NULL_PTR      if @p dev or @p config_out is NULL.
+ * @return TMP102_ERR_NOT_INITIALIZED if the driver has not been initialized.
+ * @return TMP102_ERR_I2C           if the I2C transaction fails.
+ */
 tmp102_status_t tmp102_read_config(tmp102_driver_t *dev, uint16_t *config_out)
 {
     /* Validate input arguments defensively */
@@ -148,6 +200,20 @@ tmp102_status_t tmp102_read_config(tmp102_driver_t *dev, uint16_t *config_out)
     return TMP102_OK;
 }
 
+/**
+ * @brief Write a 16-bit value to the TMP102 Configuration Register.
+ *
+ * Constructs a 3-byte I2C write payload: register pointer (0x01)
+ * followed by the MSB and LSB of @p config.
+ *
+ * @param[in] dev     Pointer to an initialized driver context.
+ * @param[in] config  The 16-bit value to write.
+ *
+ * @return TMP102_OK                on success.
+ * @return TMP102_ERR_NULL_PTR      if @p dev is NULL.
+ * @return TMP102_ERR_NOT_INITIALIZED if the driver has not been initialized.
+ * @return TMP102_ERR_I2C           if the I2C transaction fails.
+ */
 tmp102_status_t tmp102_write_config(tmp102_driver_t *dev, uint16_t config)
 {
     /* Validate input arguments defensively */
@@ -184,6 +250,19 @@ tmp102_status_t tmp102_write_config(tmp102_driver_t *dev, uint16_t config)
 /* Configuration Bit-Field Operations API                                     */
 /* ========================================================================= */
 
+/**
+ * @brief Set (OR) specific bits in the Configuration Register.
+ *
+ * Performs a read-modify-write cycle: reads the current value, ORs
+ * in @p mask, and writes the result back.
+ *
+ * @param[in] dev   Pointer to an initialized driver context.
+ * @param[in] mask  Bitmask of bits to set
+ *                  (e.g. TMP102_CONFIG_SD_MASK).
+ *
+ * @return TMP102_OK on success, or the first error encountered during
+ *         the read-modify-write sequence.
+ */
 tmp102_status_t tmp102_set_config_bits(tmp102_driver_t *dev, uint16_t mask)
 {
     /* Read current configuration */
@@ -198,6 +277,19 @@ tmp102_status_t tmp102_set_config_bits(tmp102_driver_t *dev, uint16_t mask)
     return tmp102_write_config(dev, config);
 }
 
+/**
+ * @brief Clear (AND ~mask) specific bits in the Configuration Register.
+ *
+ * Performs a read-modify-write cycle: reads the current value, ANDs
+ * with the inverse of @p mask, and writes the result back.
+ *
+ * @param[in] dev   Pointer to an initialized driver context.
+ * @param[in] mask  Bitmask of bits to clear
+ *                  (e.g. TMP102_CONFIG_SD_MASK).
+ *
+ * @return TMP102_OK on success, or the first error encountered during
+ *         the read-modify-write sequence.
+ */
 tmp102_status_t tmp102_clear_config_bits(tmp102_driver_t *dev, uint16_t mask)
 {
     /* Read current configuration */
@@ -212,6 +304,19 @@ tmp102_status_t tmp102_clear_config_bits(tmp102_driver_t *dev, uint16_t mask)
     return tmp102_write_config(dev, config);
 }
 
+/**
+ * @brief Set the Fault Queue count (F1:F0 field) in the Configuration Register.
+ *
+ * Reads the current configuration, clears the F1:F0 bits, inserts
+ * the two LSBs of @p value, and writes the result back.
+ *
+ * @param[in] dev    Pointer to an initialized driver context.
+ * @param[in] value  Fault queue selector (0–3).
+ *                   Use TMP102_FAULT_QUEUE_1 / _2 / _4 / _6.
+ *
+ * @return TMP102_OK on success, or the first error encountered during
+ *         the read-modify-write sequence.
+ */
 tmp102_status_t tmp102_set_fault_queue(tmp102_driver_t *dev, uint8_t value)
 {
     /* Read current configuration */
@@ -227,6 +332,19 @@ tmp102_status_t tmp102_set_fault_queue(tmp102_driver_t *dev, uint8_t value)
     return tmp102_write_config(dev, config);
 }
 
+/**
+ * @brief Set the Conversion Rate (CR1:CR0 field) in the Configuration Register.
+ *
+ * Reads the current configuration, clears the CR1:CR0 bits, inserts
+ * the two LSBs of @p value, and writes the result back.
+ *
+ * @param[in] dev    Pointer to an initialized driver context.
+ * @param[in] value  Conversion rate selector (0–3).
+ *                   Use TMP102_CONV_RATE_0_25HZ / _1HZ / _4HZ / _8HZ.
+ *
+ * @return TMP102_OK on success, or the first error encountered during
+ *         the read-modify-write sequence.
+ */
 tmp102_status_t tmp102_set_conversion_rate(tmp102_driver_t *dev, uint8_t value)
 {
     /* Read current configuration */
@@ -242,6 +360,18 @@ tmp102_status_t tmp102_set_conversion_rate(tmp102_driver_t *dev, uint8_t value)
     return tmp102_write_config(dev, config);
 }
 
+/**
+ * @brief Trigger a single temperature conversion (One-Shot mode).
+ *
+ * Sets the OS bit in the Configuration Register. This is only
+ * meaningful when the sensor is in Shutdown mode (SD = 1); the
+ * hardware clears the OS bit automatically once the conversion
+ * completes.
+ *
+ * @param[in] dev  Pointer to an initialized driver context.
+ *
+ * @return TMP102_OK on success, or the first error encountered.
+ */
 tmp102_status_t tmp102_trigger_one_shot(tmp102_driver_t *dev)
 {
     /* Set the OS bit to trigger a single conversion in Shutdown mode */
@@ -253,11 +383,22 @@ tmp102_status_t tmp102_trigger_one_shot(tmp102_driver_t *dev)
 /* ========================================================================= */
 
 /**
- * @brief Internal helper: write a temperature threshold to a 12-bit register.
+ * @brief Write a temperature threshold to a 12-bit alert register.
  *
- * Converts float °C to 12-bit two's complement count, left-justifies into
- * 16-bit Big-Endian register format, and writes via I2C to the specified
- * register pointer (0x02 for T_LOW, 0x03 for T_HIGH).
+ * Converts a floating-point temperature (°C) to a 12-bit two's
+ * complement count (0.0625 °C / LSB), left-justifies it into the
+ * 16-bit Big-Endian register format, and sends a 3-byte I2C write
+ * to the specified register.
+ *
+ * @param[in] dev          Pointer to an initialized driver context.
+ * @param[in] reg_ptr      Register pointer byte
+ *                         (TMP102_REG_T_LOW or TMP102_REG_T_HIGH).
+ * @param[in] temp_celsius Threshold temperature in °C.
+ *
+ * @return TMP102_OK                on success.
+ * @return TMP102_ERR_NULL_PTR      if @p dev is NULL.
+ * @return TMP102_ERR_NOT_INITIALIZED if the driver has not been initialized.
+ * @return TMP102_ERR_I2C           if the I2C transaction fails.
  */
 static tmp102_status_t write_threshold_register(tmp102_driver_t *dev,
                                                 uint8_t reg_ptr,
@@ -308,11 +449,21 @@ static tmp102_status_t write_threshold_register(tmp102_driver_t *dev,
 }
 
 /**
- * @brief Internal helper: read a temperature threshold from a 12-bit register.
+ * @brief Read a temperature threshold from a 12-bit alert register.
  *
- * Reads 16-bit Big-Endian register from the specified pointer (0x02 for T_LOW,
- * 0x03 for T_HIGH), extracts 12-bit two's complement count, sign-extends,
- * and converts to float °C.
+ * Sends the register pointer byte, reads the 16-bit Big-Endian
+ * value, extracts the 12-bit two's complement count from
+ * bits [15:4], sign-extends it, and converts to °C.
+ *
+ * @param[in]  dev       Pointer to an initialized driver context.
+ * @param[in]  reg_ptr   Register pointer byte
+ *                       (TMP102_REG_T_LOW or TMP102_REG_T_HIGH).
+ * @param[out] temp_out  Receives the threshold temperature in °C.
+ *
+ * @return TMP102_OK                on success.
+ * @return TMP102_ERR_NULL_PTR      if @p dev or @p temp_out is NULL.
+ * @return TMP102_ERR_NOT_INITIALIZED if the driver has not been initialized.
+ * @return TMP102_ERR_I2C           if the I2C transaction fails.
  */
 static tmp102_status_t read_threshold_register(tmp102_driver_t *dev,
                                                uint8_t reg_ptr,
@@ -356,21 +507,53 @@ static tmp102_status_t read_threshold_register(tmp102_driver_t *dev,
     return TMP102_OK;
 }
 
+/**
+ * @brief Set the T_LOW alert threshold in °C.
+ *
+ * @param[in] dev           Pointer to an initialized driver context.
+ * @param[in] temp_celsius  Threshold temperature in °C.
+ *
+ * @return TMP102_OK on success, or an error from write_threshold_register().
+ */
 tmp102_status_t tmp102_set_t_low(tmp102_driver_t *dev, float temp_celsius)
 {
     return write_threshold_register(dev, TMP102_REG_T_LOW, temp_celsius);
 }
 
+/**
+ * @brief Set the T_HIGH alert threshold in °C.
+ *
+ * @param[in] dev           Pointer to an initialized driver context.
+ * @param[in] temp_celsius  Threshold temperature in °C.
+ *
+ * @return TMP102_OK on success, or an error from write_threshold_register().
+ */
 tmp102_status_t tmp102_set_t_high(tmp102_driver_t *dev, float temp_celsius)
 {
     return write_threshold_register(dev, TMP102_REG_T_HIGH, temp_celsius);
 }
 
+/**
+ * @brief Read the current T_LOW alert threshold in °C.
+ *
+ * @param[in]  dev       Pointer to an initialized driver context.
+ * @param[out] temp_out  Receives the threshold temperature in °C.
+ *
+ * @return TMP102_OK on success, or an error from read_threshold_register().
+ */
 tmp102_status_t tmp102_get_t_low(tmp102_driver_t *dev, float *temp_out)
 {
     return read_threshold_register(dev, TMP102_REG_T_LOW, temp_out);
 }
 
+/**
+ * @brief Read the current T_HIGH alert threshold in °C.
+ *
+ * @param[in]  dev       Pointer to an initialized driver context.
+ * @param[out] temp_out  Receives the threshold temperature in °C.
+ *
+ * @return TMP102_OK on success, or an error from read_threshold_register().
+ */
 tmp102_status_t tmp102_get_t_high(tmp102_driver_t *dev, float *temp_out)
 {
     return read_threshold_register(dev, TMP102_REG_T_HIGH, temp_out);

@@ -12,6 +12,22 @@
 /* Emulator Lifecycle & Configuration API                                   */
 /* ========================================================================= */
 
+/**
+ * @brief Initialize the TMP102 virtual hardware to power-up defaults.
+ *
+ * Sets every register and internal state field to the values
+ * specified in the TMP102 datasheet for initial power-up:
+ *   - temp_register   = 0x0000 (0 °C)
+ *   - config_register = 0x60A0
+ *   - t_low_register  = 0x4B00 (75 °C)
+ *   - t_high_register = 0x5000 (80 °C)
+ *   - pointer_register= 0x00   (Temperature)
+ *   - i2c_address     = 0x48   (ADD0 → GND)
+ *   - fault_count     = 0
+ *   - alert_state     = false
+ *
+ * @param[out] hw  Caller-allocated emulator context. Ignored if NULL.
+ */
 void sim_init(tmp102_virtual_hw_t *hw) {
   if (hw == NULL) {
     return;
@@ -30,6 +46,14 @@ void sim_init(tmp102_virtual_hw_t *hw) {
   hw->alert_state = false;
 }
 
+/**
+ * @brief Reset the emulator to power-up defaults.
+ *
+ * Equivalent to cycling power on a physical TMP102. Delegates to
+ * sim_init() so the reset values are always kept in one place.
+ *
+ * @param[in,out] hw  Emulator context to reset. Ignored if NULL.
+ */
 void sim_reset(tmp102_virtual_hw_t *hw) {
   /* Reset all registers and internal state back to power-up defaults */
   sim_init(hw);
@@ -40,11 +64,15 @@ void sim_reset(tmp102_virtual_hw_t *hw) {
 /* ========================================================================= */
 
 /**
- * @brief Decode a 12-bit left-justified threshold register to float Celsius.
+ * @brief Decode a 12-bit left-justified threshold register to °C.
  *
- * Threshold registers (T_LOW, T_HIGH) store temperature in the same
- * 12-bit two's complement left-justified format as the temperature register
- * in Normal Mode: bits 15..4 contain the signed count, bits 3..0 = 0.
+ * Threshold registers (T_LOW / T_HIGH) use the same 12-bit two's
+ * complement left-justified layout as the Temperature Register in
+ * Normal Mode: bits [15:4] hold the signed count, bits [3:0] are zero.
+ *
+ * @param[in] reg_val  Raw 16-bit register value.
+ *
+ * @return Temperature in degrees Celsius (0.0625 °C resolution).
  */
 static float sim_decode_threshold_celsius(uint16_t reg_val) {
   int16_t count = (int16_t)(reg_val >> 4);
@@ -58,10 +86,14 @@ static float sim_decode_threshold_celsius(uint16_t reg_val) {
 }
 
 /**
- * @brief Update the AL bit in the config register based on alert_state and POL.
+ * @brief Refresh the AL (Alert) bit in the config register.
  *
- * POL=0 (active low):  alert_state=true → AL=0, alert_state=false → AL=1
- * POL=1 (active high): alert_state=true → AL=1, alert_state=false → AL=0
+ * The AL bit reflects the current alert output level.  Its
+ * relationship to @c alert_state depends on the Polarity (POL) bit:
+ *   - POL = 0 (active-low):  AL = !alert_state
+ *   - POL = 1 (active-high): AL =  alert_state
+ *
+ * @param[in,out] hw  Emulator context whose config register is updated.
  */
 static void sim_update_al_bit(tmp102_virtual_hw_t *hw) {
   bool pol = (hw->config_register & TMP102_CONFIG_POL_MASK) != 0U;
@@ -83,26 +115,29 @@ static void sim_update_al_bit(tmp102_virtual_hw_t *hw) {
 }
 
 /**
- * @brief Evaluate thermostat alert conditions after a temperature update.
+ * @brief Evaluate thermostat alert conditions after a temperature change.
  *
- * Implements the TMP102 thermostat logic:
+ * Implements the full TMP102 thermostat state-machine, including both
+ * Comparator and Interrupt modes and the Fault Queue mechanism.
  *
- * Comparator Mode (TM=0, default):
- *   - Alert asserts when temp >= T_HIGH (after fault queue count met)
- *   - Alert de-asserts when temp < T_LOW
- *   - Between T_LOW and T_HIGH: previous state held (hysteresis)
+ * **Comparator Mode** (TM = 0, default):
+ *   - Alert asserts when temp ≥ T_HIGH (after fault queue threshold).
+ *   - Alert de-asserts when temp < T_LOW (immediately).
+ *   - In the hysteresis band [T_LOW, T_HIGH): previous state is held.
  *
- * Interrupt Mode (TM=1):
- *   - Alert asserts when temp >= T_HIGH (after fault queue count met)
- *   - Alert toggles (de-asserts) when temp < T_LOW (after fault queue count met)
- *   - Alert is acknowledged (cleared) by reading the config register
+ * **Interrupt Mode** (TM = 1):
+ *   - Alert asserts on temp ≥ T_HIGH (after fault queue threshold).
+ *   - Alert toggles (de-asserts) on temp < T_LOW (after fault queue
+ *     threshold).
+ *   - Reading the Configuration Register acknowledges (clears) the
+ *     alert (handled inside sim_i2c_write_read()).
  *
- * Fault Queue: The fault_count increments for each consecutive temperature
- * reading that satisfies the trigger condition. Alert state only changes
- * when fault_count reaches the configured F1:F0 threshold.
+ * **Fault Queue**: @c fault_count increments on each consecutive
+ * reading that satisfies the trigger condition.  The alert state
+ * changes only when @c fault_count reaches the F1:F0 threshold.
  *
- * @param hw           Pointer to emulator hardware state.
- * @param temp_celsius Current ambient temperature in °C.
+ * @param[in,out] hw            Emulator context to evaluate.
+ * @param[in]     temp_celsius  Current ambient temperature in °C.
  */
 static void sim_evaluate_alert(tmp102_virtual_hw_t *hw, float temp_celsius) {
   /* Decode threshold values from registers */
@@ -181,6 +216,18 @@ static void sim_evaluate_alert(tmp102_virtual_hw_t *hw, float temp_celsius) {
 /* Backdoor API — Physical Condition Injection                               */
 /* ========================================================================= */
 
+/**
+ * @brief Inject a simulated ambient temperature into the emulator.
+ *
+ * Converts @p temp_celsius to the internal register encoding (12-bit
+ * or 13-bit two's complement, depending on the EM bit), stores it
+ * in @c temp_register, and then re-evaluates the thermostat alert
+ * logic via sim_evaluate_alert().
+ *
+ * @param[in,out] hw            Emulator context to update.
+ *                              Ignored if NULL.
+ * @param[in]     temp_celsius  Ambient temperature in °C.
+ */
 void sim_set_ambient_temperature(tmp102_virtual_hw_t *hw, float temp_celsius) {
   if (hw == NULL) {
     return;
@@ -220,6 +267,33 @@ void sim_set_ambient_temperature(tmp102_virtual_hw_t *hw, float temp_celsius) {
 /* I2C Protocol Handlers                                                     */
 /* ========================================================================= */
 
+/**
+ * @brief Handle a simulated I2C Write-then-Read (Repeated Start) transaction.
+ *
+ * Emulates the TMP102 response to an I2C combined write-read
+ * sequence:
+ *   1. Validates the target address against @c hw->i2c_address.
+ *   2. If @p tx_len > 0, updates the Pointer Register from @c tx[0].
+ *   3. Reads the 16-bit value from the currently selected register
+ *      and stores the Big-Endian result in @p rx.
+ *
+ * In **Interrupt Mode** (TM = 1), reading the Configuration Register
+ * acknowledges the alert by clearing @c alert_state and refreshing
+ * the AL bit.
+ *
+ * @param[in]  user_data  Opaque pointer; must point to a valid
+ *                        tmp102_virtual_hw_t instance.
+ * @param[in]  addr       7-bit I2C target address.
+ * @param[in]  tx         Pointer byte buffer (may be NULL if
+ *                        @p tx_len is 0).
+ * @param[in]  tx_len     Number of bytes in @p tx.
+ * @param[out] rx         Buffer to receive the 2-byte register value.
+ * @param[in]  rx_len     Size of @p rx in bytes (must be ≥ 2).
+ *
+ * @return  1 on success.
+ * @return -1 on error (NULL pointers, address mismatch, invalid
+ *         pointer register, or insufficient @p rx_len).
+ */
 int sim_i2c_write_read(void *user_data, uint8_t addr, const uint8_t *tx,
                        size_t tx_len, uint8_t *rx, size_t rx_len) {
   /* Validate input arguments defensively */
@@ -281,6 +355,27 @@ int sim_i2c_write_read(void *user_data, uint8_t addr, const uint8_t *tx,
   return 1;
 }
 
+/**
+ * @brief Handle a simulated I2C Write-only transaction.
+ *
+ * Emulates the TMP102 response to an I2C write:
+ *   1. Validates the target address against @c hw->i2c_address.
+ *   2. Updates the Pointer Register from @c tx[0].
+ *   3. If @p tx_len == 3, writes the 16-bit payload (@c tx[1]:tx[2])
+ *      to the selected register.  The Temperature Register (0x00)
+ *      is read-only and writes to it are silently ignored.
+ *
+ * @param[in] user_data  Opaque pointer; must point to a valid
+ *                       tmp102_virtual_hw_t instance.
+ * @param[in] addr       7-bit I2C target address.
+ * @param[in] tx         Transmission buffer (pointer byte +
+ *                       optional 2-byte payload).
+ * @param[in] tx_len     Number of bytes in @p tx (1 or 3).
+ *
+ * @return  1 on success.
+ * @return -1 on error (NULL pointers, address mismatch, invalid
+ *         pointer register, or unsupported @p tx_len).
+ */
 int sim_i2c_write(void *user_data, uint8_t addr, const uint8_t *tx,
                   size_t tx_len) {
   /* Validate input arguments defensively */
